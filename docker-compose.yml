@@ -71,19 +71,6 @@ services:
     depends_on:
       - postgres
 
-  devcontainer:
-    build:
-      context: ./docker
-      dockerfile: dev.Dockerfile
-    container_name: devcontainer
-    volumes:
-      - .:/workspace   # repo root
-    working_dir: /workspace
-    command: sleep infinity   # keeps the container alive so VS Code can attach to it
-    depends_on:
-      - redpanda
-      - postgres
-
 volumes:
   redpanda-data:
   postgres-data:
