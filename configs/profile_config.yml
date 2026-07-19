@@ -1,0 +1,64 @@
+# ============================================================
+#   File: configs/profile_config.yml
+# ============================================================
+#   Purpose: 
+#       Configuration for profile_gen.py.
+#
+#   Logic:
+#    - All profile-generation parameters live here so nothing is hardcoded in the script.
+#
+
+seed: 0
+num_profiles: 5000
+
+# Fraction of profiles seeded as dormant (last_activity_at 30-90 days back). Reference point for dormant/recent last_activity_at offsets. 
+# Kept in config; so the same seed always produces byte-identical output regardless of what day the script is run.
+reference_time: "2026-01-01T00:00:00Z"
+dormant_ratio: 0.05
+
+# Home location pool.
+locations:
+  - { city: "Istanbul", country: "TR" }
+  - { city: "Ankara", country: "TR" }
+  - { city: "Izmir", country: "TR" }
+  - { city: "Bursa", country: "TR" }
+  - { city: "Antalya", country: "TR" }
+  - { city: "London", country: "GB" }
+  - { city: "Berlin", country: "DE" }
+  - { city: "Paris", country: "FR" }
+
+merchant_categories:
+  - grocery
+  - dining
+  - retail
+  - travel
+  - entertainment
+  - utilities
+  - healthcare
+  - electronics
+  - fuel
+
+# Lognormal(mu, sigma) parameters for average transaction amount, per income segment. These shape each profile's typical txn size.
+income_segments:
+  low:
+    avg_amount_mu: 4.5
+    avg_amount_sigma: 0.6
+    weekly_txn_frequency_range: [3, 8]
+  medium:
+    avg_amount_mu: 5.5
+    avg_amount_sigma: 0.6
+    weekly_txn_frequency_range: [5, 15]
+  high:
+    avg_amount_mu: 6.5
+    avg_amount_sigma: 0.7
+    weekly_txn_frequency_range: [8, 25]
+
+# Relative weights for sampling income_segment.
+income_segment_weights:
+  low: 0.45
+  medium: 0.40
+  high: 0.15
+
+preferred_categories_count_range: [2, 4]
+active_hours_start_range: [6, 10]   # profile's active window starts somewhere in this range
+active_hours_span_range: [8, 14]    # window length in hours, added to the start hour
