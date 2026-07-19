@@ -1,0 +1,9 @@
+# ============================================================
+#  .env — Docker environment variables
+# ============================================================
+
+# Rename this file .env to use it.
+
+# Postgres
+POSTGRES_USER=[POSTGRES_USERNAME]
+POSTGRES_PASSWORD=[POSTGRES_PASSWORD]
