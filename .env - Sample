@@ -4,6 +4,13 @@
 
 # Rename this file .env to use it.
 
-# Postgres
+# Postgres superuser (created by the postgres container; used by the scripts/postgres/ bootstrap scripts to connect as admin)
 POSTGRES_USER=[POSTGRES_USERNAME]
 POSTGRES_PASSWORD=[POSTGRES_PASSWORD]
+
+# Per-role passwords, applied by scripts/postgres/set_role_passwords.py
+APP_PRODUCER_DB_PASSWORD=[APP_PRODUCER_PASSWORD]
+APP_CONSUMER_DB_PASSWORD=[APP_CONSUMER_PASSWORD]
+APP_NOTIFIER_DB_PASSWORD=[APP_NOTIFIER_PASSWORD]
+APP_DBT_DB_PASSWORD=[APP_DBT_PASSWORD]
+APP_GRAFANA_DB_PASSWORD=[APP_GRAFANA_PASSWORD]
