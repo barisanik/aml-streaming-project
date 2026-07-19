@@ -1,7 +1,7 @@
 # ============================================================
 #  docker-compose.yml
 #
-#  Run order: redpanda → redpanda-console → postgres → grafana
+#  Run order: redpanda → redpanda-console → postgres → grafana → devcontainer
 #
 #  Usage:
 #    docker compose up          # run full pipeline
@@ -32,7 +32,7 @@ services:
       - --advertise-rpc-addr
       - redpanda:33145
     ports:
-      - "19092:19092"   # external Kafka API (host -> WSL2 producer/consumer scripts)
+      - "19092:19092"   # external Kafka API
       - "18081:18081"   # external schema registry port
     volumes:
       - redpanda-data:/var/lib/redpanda/data
@@ -69,6 +69,19 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
     depends_on:
+      - postgres
+
+  devcontainer:
+    build:
+      context: ./docker
+      dockerfile: dev.Dockerfile
+    container_name: devcontainer
+    volumes:
+      - .:/workspace   # repo root (docker-compose.yml lives here; dev.Dockerfile lives in docker/)
+    working_dir: /workspace
+    command: sleep infinity   # keeps the container alive so VS Code can attach to it
+    depends_on:
+      - redpanda
       - postgres
 
 volumes:
