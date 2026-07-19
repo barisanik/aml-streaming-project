@@ -1,11 +1,11 @@
 # ============================================================
 #  docker-compose.yml
 #
-#  Run order: redpanda → redpanda-console → postgres → grafana → devcontainer
+#  Run order: redpanda → redpanda-console → postgres → grafana
 #
 #  Usage:
-#    docker compose up          # run full pipeline
-#    docker compose up dbt      # run only dbt (assumes DB is ready)
+#    docker compose up          # start all services
+#    docker compose up postgres # start only postgres
 #    docker compose down -v     # stop and delete all data
 # ============================================================
 
@@ -77,7 +77,7 @@ services:
       dockerfile: dev.Dockerfile
     container_name: devcontainer
     volumes:
-      - .:/workspace   # repo root (docker-compose.yml lives here; dev.Dockerfile lives in docker/)
+      - .:/workspace   # repo root
     working_dir: /workspace
     command: sleep infinity   # keeps the container alive so VS Code can attach to it
     depends_on:
