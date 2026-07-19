@@ -1,0 +1,77 @@
+# ============================================================
+#  docker-compose.yml
+#
+#  Run order: redpanda → redpanda-console → postgres → grafana
+#
+#  Usage:
+#    docker compose up          # run full pipeline
+#    docker compose up dbt      # run only dbt (assumes DB is ready)
+#    docker compose down -v     # stop and delete all data
+# ============================================================
+
+services:
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --smp
+      - "1"
+      - --memory
+      - "1G"
+      - --overprovisioned
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+    ports:
+      - "19092:19092"   # external Kafka API (host -> WSL2 producer/consumer scripts)
+      - "18081:18081"   # external schema registry port
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+
+  redpanda-console:
+    image: redpandadata/console:latest
+    container_name: redpanda-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092   # internal listener, container-to-container
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redpanda
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_DB: aml_platform
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      GF_DATE_FORMATS_DEFAULT_TIMEZONE: utc
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - postgres
+
+volumes:
+  redpanda-data:
+  postgres-data:
+  grafana-data:
