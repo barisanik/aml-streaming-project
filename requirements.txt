@@ -1,0 +1,12 @@
+annotated-types==0.7.0
+confluent-kafka==2.15.0
+Faker==40.31.0
+numpy==2.4.6
+psycopg2-binary==2.9.12
+pydantic==2.13.4
+pydantic_core==2.46.4
+python-dotenv==1.2.2
+PyYAML==6.0.3
+typing-inspection==0.4.2
+typing_extensions==4.16.0
+tzdata==2026.3
