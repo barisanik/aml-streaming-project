@@ -1,0 +1,38 @@
+# /configs/producer_config.yml
+# ============================================================
+#   Config File: Producer Config
+# ============================================================
+#   Purpose: 
+#     Parameters for txn_producer.py. Includes time model, arrival process, and volume targets.
+#
+#   Logic:
+#    - All profile-generation parameters live here so nothing is hardcoded in the script.
+#
+
+reproducibility:
+  seed: 0  # binds random.seed() and numpy seed for repeatable runs
+ 
+time_model:
+  time_compression_factor: 300   # 1 real second = 300 simulated seconds
+  simulation_start: "2026-01-01T00:00:00Z"  # simulated clock start (UTC, event_time origin)
+ 
+volume:
+  target_transactions_per_simulated_day: 50000 # Transaction per day limit. Approximately 174 msg/sec at 300x compression.
+ 
+arrival_process:
+  distribution: "exponential"   # inter-arrival wait time sampling (numpy.random.exponential)
+  base_rate_per_second: 0.579   # derived from target_transactions_per_simulated_day / 86400
+ 
+hourly_intensity_multiplier:
+  # sinusoidal day/night activity curve, applied on top of base_rate_per_second
+  type: "sinusoidal"
+  peak_hour: 14   # hour of day (simulated, 0-23) with highest activity
+  trough_hour: 3  # hour of day with lowest activity
+  amplitude: 0.6  # multiplier swing around 1.0 (e.g. 0.4x - 1.6x)
+  baseline: 1.0
+ 
+topics:
+  transactions_topic: "transactions"   # Redpanda topic name
+ 
+profiles_source:
+  path: "profiles.json"   # output of profile_gen.py, read by producer for profile-driven generation
