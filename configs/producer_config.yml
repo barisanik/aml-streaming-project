@@ -30,6 +30,28 @@ hourly_intensity_multiplier:
   trough_hour: 3  # hour of day with lowest activity
   amplitude: 0.6  # multiplier swing around 1.0 (e.g. 0.4x - 1.6x)
   baseline: 1.0
+
+channel:
+  morning:            # 7 - 13
+    atm: 0.25
+    branch: 0.25
+    mobile: 0.25
+    web: 0.25
+  afternoon:          # 13 - 19
+    atm: 0.25
+    branch: 0.25
+    mobile: 0.25
+    web: 0.25
+  evening:            # 19 - 1
+    atm: 0.10
+    branch: 0.0
+    mobile: 0.45
+    web: 0.45
+  night:              # 1 - 7
+    atm: 0.06
+    branch: 0.0
+    mobile: 0.47
+    web: 0.47
  
 topics:
   transactions_topic: "transactions"   # Redpanda topic name

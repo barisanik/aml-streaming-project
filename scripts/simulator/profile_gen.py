@@ -46,7 +46,7 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
     handlers=[
         logging.StreamHandler(),                                                    # enables visibility on console
-        logging.FileHandler(LOG_DIR / "txn_producer.log", encoding="utf-8"),        # enables recording on a file
+        logging.FileHandler(LOG_DIR / "profile_gen.log", encoding="utf-8"),        # enables recording on a file
     ],
 )
 
