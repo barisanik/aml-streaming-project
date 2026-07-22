@@ -1,6 +1,6 @@
-"""
+""" /scripts/simulator/profile_gen.py
 # ============================================================
-#   Script: simulator/profile_gen.py
+#   Script: Profile Generator
 # ============================================================
 #   Purpose: 
 #       Generate synthetic customer profiles for the AML/Fraud simulator.
@@ -11,7 +11,7 @@
 #
 #   Usage:
 #    - Change directory to project root
-#    - Run following command: "python simulator/profile_gen.py"
+#    - Run following command: "python scripts/simulator/profile_gen.py"
 """
 
 import json
@@ -21,23 +21,36 @@ import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-
 import numpy as np
 import yaml
 from faker import Faker
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from shared.schemas import EntitySegment, IncomeSegment, Profile
 
+### Initial parameters ###
+
+## PATHS
+# Project Path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+LOG_DIR = PROJECT_ROOT / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)      # create logs folder if it does not exist yet
+
+# Config Paths
+CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "profile_config.yml"
+OUTPUT_PATH = Path(__file__).resolve().parent / "profiles.json"
+
+# Logging parameters
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
+    handlers=[
+        logging.StreamHandler(),                                                    # enables visibility on console
+        logging.FileHandler(LOG_DIR / "txn_producer.log", encoding="utf-8"),        # enables recording on a file
+    ],
 )
-logger = logging.getLogger(__name__)
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "profile_config.yml"
-OUTPUT_PATH = Path(__file__).resolve().parent / "profiles.json"
-
+## FUNCTIONS
 # Reads profile_config.yml.
 def load_config(path: Path) -> dict:
     with open(path, "r", encoding="utf-8") as f:
@@ -110,22 +123,29 @@ def main() -> None:
     now = datetime.fromisoformat(config["reference_time"].replace("Z", "+00:00"))
     num_profiles = config["num_profiles"]   # Defines profile count to create.
 
-    logger.info("Generating %d profiles (seed=%d)", num_profiles, seed)
+    logging.info("Generating %d profiles (seed=%d)", num_profiles, seed)
 
     # Creates profiles using config.
     profiles = [build_profile(config, rng, np_rng, now) for _ in range(num_profiles)]
 
     # Gets count of non-active (dormant) profiles for the last 30 days.
     dormant_count = sum(1 for p in profiles if p.last_activity_at < now - timedelta(days=30))
-    logger.info("Generated %d profiles, %d flagged dormant (%.1f%%)",
+    logging.info("Generated %d profiles, %d flagged dormant (%.1f%%)",
                 len(profiles), dormant_count, 100 * dormant_count / len(profiles))
 
     # Exports profiles to profiles.json
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump([p.model_dump(mode="json") for p in profiles], f, indent=2, ensure_ascii=False)
 
-    logger.info("Wrote profiles to %s", OUTPUT_PATH)
+    logging.info("Wrote profiles to %s", OUTPUT_PATH)
 
 
 if __name__ == "__main__":
+    
+    script_start_time = datetime.now()
+    logging.info(f"Script started at {script_start_time}.")
+
     main()
+    
+    script_end_time = datetime.now()
+    logging.info(f"Script ended at {script_end_time}. Execution duration: {script_end_time - script_start_time}")
