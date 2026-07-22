@@ -53,8 +53,23 @@ channel:
     mobile: 0.47
     web: 0.47
  
+transaction_type_weights:
+  transfer_in: 0.10
+  transfer_out: 0.40
+  card_payment: 0.25
+  cash_deposit: 0.10
+  cash_withdrawal: 0.15
+
 topics:
   transactions_topic: "transactions"   # Redpanda topic name
  
+currencies:
+  TR: "TRY"
+  EU: "EUR"
+  GB: "GBP"
+
+kafka:
+  bootstrap_servers: "localhost:19092"  # URL of redpanda working on Docker
+
 profiles_source:
   path: "profiles.json"   # output of profile_gen.py, read by producer for profile-driven generation
