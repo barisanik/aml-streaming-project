@@ -1,0 +1,42 @@
+# /configs/scenario_rules.yml
+# ============================================================
+#   File: AML/Fraud Scenario Config
+# ============================================================
+#   Purpose:
+#       Parameters for injected fraud/AML scenario series.
+#
+#   Logic:
+#    - Each scenario type defines how a series of transactions is generated.
+#
+
+seed: 0
+
+scenario_types:
+  structuring:
+    name: "structuring"
+    trigger_probability: 0.001      # chance of starting this scenario per cycle
+    series_length:                  # number of transactions in one scenario series
+      min: 3
+      max: 5
+    inter_transaction_gap_minutes:  # simulated time gap between two transactions in the series
+      min: 30
+      max: 180
+    window_hours: 72                # time window to monitor for this pattern
+    threshold: 10000                # reporting threshold amount
+    band_low_pct: 0.85              # lower bound of the "just under threshold" amount band, as a percent of threshold
+    band_high_pct: 0.99             # upper bound of the "just under threshold" amount band, as a percent of threshold
+    min_count: 3                    # minimum number of in-band transactions needed to flag this pattern
+    sum_multiplier: 1.0             # cumulative sum must reach at least threshold times this value
+
+  smurfing:
+    name: "smurfing"
+    trigger_probability: 0.001      # chance of starting this scenario per cycle
+    series_length:                  # number of transactions in one scenario series
+      min: 11
+      max: 15
+    inter_transaction_gap_minutes:  # simulated time gap between two transactions in the series
+      min: 10
+      max: 60
+    window_hours: 24                # time window to monitor for this pattern
+    max_amount: 1000                # upper limit for each single transaction amount
+    min_count: 11                   # minimum number of small transactions needed to flag this pattern

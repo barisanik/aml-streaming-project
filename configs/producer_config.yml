@@ -73,3 +73,9 @@ kafka:
 
 profiles_source:
   path: "profiles.json"   # output of profile_gen.py, read by producer for profile-driven generation
+
+postgres:
+  host: "localhost"
+  port: 5432
+  dbname: "aml_platform"
+  user: "app_producer"
