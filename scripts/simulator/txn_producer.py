@@ -16,19 +16,29 @@
 #    - Run following command: "python scripts/simulator/txn_producer.py"
 """
 
-import json
-import logging
-import random
 import sys
+import os
+from pathlib import Path
+
+import json
+import yaml
+
+import random
+from faker import Faker
 import uuid
+
 from datetime import datetime, timedelta
 import time
-from pathlib import Path
+
 import numpy as np
-import yaml
-from faker import Faker
-import confluent_kafka
+
 from pydantic import ValidationError
+import logging
+from dotenv import load_dotenv
+import confluent_kafka
+import psycopg2
+
+load_dotenv()
 
 ### Initial parameters ###
 
@@ -40,11 +50,12 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)      # create logs folder if it does 
 
 # Config Paths
 CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "producer_config.yml"
+SCN_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "scenario_config.yml"
 PROFILES_PATH = Path(__file__).resolve().parent.parent / "simulator" / "profiles.json"
 SHARED_DIR = PROJECT_ROOT / "shared"
 
 sys.path.insert(0, str(SHARED_DIR))
-from schemas import Channel, Transaction, TxnType
+from schemas import Channel, Transaction, TxnType, ScenarioType
 
 # Logging parameters
 logging.basicConfig(
@@ -68,6 +79,7 @@ def load_profiles(path: Path) -> dict:
 
 ## CONFIGS
 config = load_config(CONFIG_PATH)
+scenario = load_config(SCN_CONFIG_PATH)
 profiles = load_profiles(PROFILES_PATH)
 
 ## SEED
@@ -129,7 +141,48 @@ def delivery_callback(err, msg):
     if err is not None:
         logging.error(f"Delivery failed | error={err} | key={msg.key()}")
 
-def create_transaction_event(current_sim_time, customer_profile):
+def write_answer_key(transaction_id, scenario_id, scenario_type, injected_at):
+    sql = f"INSERT INTO public.answer_key (transaction_id, scenario_id, scenario_type, injected_at) VALUES ('{transaction_id}','{scenario_id}','{scenario_type}','{injected_at}')"
+    return sql
+
+def create_scenario(current_sim_time, customer_profile, scenario_type):
+    series_length = random.randint(scenario_type["series_length"]["min"],scenario_type["series_length"]["max"])
+    gap_min = scenario_type["inter_transaction_gap_minutes"]["min"]
+    gap_max = scenario_type["inter_transaction_gap_minutes"]["max"]
+    window_hours = scenario_type["window_hours"]
+    window_limit = current_sim_time + timedelta(hours=window_hours)
+
+    due_times = []
+    t = current_sim_time
+    for _ in range(series_length):
+        gap = random.randint(gap_min, gap_max)
+        t = t + timedelta(minutes=gap)
+        due_times.append(t)
+
+    # Keep all due dates in window limit
+    if due_times[-1] > window_limit:
+        due_times[-1] = window_limit
+    
+    scenario_data = {
+        "scenario_id":str(uuid.uuid4()),
+        "current_sim_time":current_sim_time,
+        "account_id":customer_profile["account_id"],
+        "scenario_length":series_length,    # Sets a random series length
+        "scenario_type": scenario_type["name"],
+        "due_times":due_times
+    }
+
+    def get_due_scenario(active_scenarios, current_sim_time):
+        for s in active_scenarios:
+            if s["due_times"] and s["due_times"][0] <= current_sim_time:
+                return s
+        return None
+
+    print("NEW SCENARIO")
+    print(scenario_data)
+    return scenario_data
+
+def create_transaction_event(current_sim_time, customer_profile, is_poisoned, scenario_details, conn):
     # Get customer details
     transaction_id = uuid.uuid4()
     topic = config["topics"]["transactions_topic"]
@@ -172,6 +225,17 @@ def create_transaction_event(current_sim_time, customer_profile):
     elif txn_type in (TxnType.CASH_DEPOSIT.value, TxnType.CASH_WITHDRAWAL.value):   # Generates a random ATM ID
         counterpart_id = fake.bothify(text="ATM-########")
 
+    # Overwriting suspicious activity on transaction
+    if is_poisoned:
+        cur = conn.cursor()
+        try:
+            sql = write_answer_key(transaction_id=transaction_id, scenario_id=scenario_details["scenario_id"], scenario_type=scenario_details["scenario_type"], injected_at=str(datetime.now()))
+            cur.execute(sql)
+        except Exception as e:
+            logging.critical(f"Script failed: {e}")
+        finally:
+            cur.close()
+
     # Formatting whole record
     event_dict = {
         "transaction_id": str(transaction_id),
@@ -205,46 +269,76 @@ def create_transaction_event(current_sim_time, customer_profile):
 
     # Logging transaction
     logging.info(
-        f"{'New transaction':<14} | "
-        f"{'type=' + txn_type:<20} | "
-        f"{'acc=' + str(account_id)[:8]:<13} | "
-        f"{'cnt=' + str(counterpart_id)[:8]:<13} | "
-        f"{'ch=' + channel:<11} | "
-        f"{'amount=' + f'{amount:.2f}':<14} | "
-        f"{'currency=' + currency:<5} | "
-        f"{'merch=' + merchant_category:<22} | "
-        f"{'time=' + event_time.strftime('%H:%M:%S'):<14} | "
-        f"{'loc=' + city + '/' + country:<20}"
+        f"{'New transaction'                            :<14} | "
+        f"{'type=' + txn_type                           :<20} | "
+        f"{'acc=' + str(account_id)[:8]                 :<13} | "
+        f"{'cnt=' + str(counterpart_id)[:8]             :<13} | "
+        f"{'ch=' + channel                              :<11} | "
+        f"{'amount=' + f'{amount:.2f}'                  :<14} | "
+        f"{'currency=' + currency                       :<5} | "
+        f"{'merch=' + merchant_category                 :<22} | "
+        f"{'time=' + event_time.strftime('%H:%M:%S')    :<14} | "
+        f"{'loc=' + city + '/' + country                :<20}"
     )
 
     # Return transaction
     return {
-        "transaction_id":str(transaction_id),
-        "account_id":account_id,
-        "topic":topic,
+        "transaction_id":   str(transaction_id),
+        "account_id":       account_id,
+        "topic":            topic,
         "merchant_category":merchant_category,
-        "amount":amount,
-        "currency":currency,
-        "channel":channel,
-        "city":city,
-        "country":country,
-        "event_time":event_time,
-        "produced_at":produced_at
+        "amount":           amount,
+        "currency":         currency,
+        "channel":          channel,
+        "city":             city,
+        "country":          country,
+        "event_time":       event_time,
+        "produced_at":      produced_at
     }
 
 def main(current_sim_time,producer) -> None:
     logging.info(f"Simulation started at {current_sim_time}")
 
+    conn = psycopg2.connect(
+        host=       config["postgres"]["host"],
+        port=       config["postgres"]["port"],
+        user=       config["postgres"]["user"],
+        password=   os.environ["APP_PRODUCER_DB_PASSWORD"],
+        dbname=     config["postgres"]["dbname"],
+    )
+    conn.autocommit = True
+    active_scenarios = []
+
     for day in range(0,1):
         logging.info(f"Day: {day}")
         for i in range(0, daily_transaction_limit):
+            
+            trx_user = random.choice(profiles)
 
-            create_transaction_event(current_sim_time, random.choice(profiles))
+            trigger_probability = random.choices([True,False],weights=[0.01, 0.99])[0]
+            scenario_details = None
+            if (trigger_probability):
+                scenario_type_names = list(scenario["scenario_types"].keys())
+                scenario_type_name = random.choice(scenario_type_names)
+                scenario_type = "structuring" # DEBUG - SİLİNECEK
+                scenario_type = scenario["scenario_types"][scenario_type_name] # Get relevant config of selected scenario type
+                
+                # Check if randomly selected account is in an active scenario or not. If it is select another account.
+                active_account_ids = {s["account_id"] for s in active_scenarios}
+                while trx_user["account_id"] in active_account_ids:
+                    trx_user = random.choice(profiles)
+
+                scenario_details = create_scenario(current_sim_time=current_sim_time, customer_profile=trx_user, scenario_type=scenario_type)
+                active_scenarios.append(scenario_details)
+
+            # DEBUG: Trigger prob. true çıkarsa zaten yeni senaryo başlar. Eğer çıkmazsa halihazırdaki senaryoların due date'i göz önünde bulundurularak işlemin poisoned olup olmaması kontrol edilmeli.
+            create_transaction_event(current_sim_time, trx_user, is_poisoned=trigger_probability, scenario_details=scenario_details, conn=conn)
 
             wait_time = create_wait_time(rate=base_rate_per_second, time=current_sim_time)
             current_sim_time = current_sim_time + timedelta(seconds=wait_time)
             time.sleep(wait_time / time_compression_factor)
 
+    conn.close()
     producer.flush()
     logging.info(f"Simulation ended at {current_sim_time}")
 
