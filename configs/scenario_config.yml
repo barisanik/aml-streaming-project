@@ -14,7 +14,7 @@ seed: 0
 scenario_types:
   structuring:
     name: "structuring"
-    trigger_probability: 0.001      # chance of starting this scenario per cycle
+    forced_txn_type: "cash_deposit"
     series_length:                  # number of transactions in one scenario series
       min: 3
       max: 5
@@ -30,7 +30,7 @@ scenario_types:
 
   smurfing:
     name: "smurfing"
-    trigger_probability: 0.001      # chance of starting this scenario per cycle
+    forced_txn_type: "transfer_out"
     series_length:                  # number of transactions in one scenario series
       min: 11
       max: 15
@@ -39,4 +39,5 @@ scenario_types:
       max: 60
     window_hours: 24                # time window to monitor for this pattern
     max_amount: 1000                # upper limit for each single transaction amount
+    min_amount: 50                  # lower limit for each single transaction amount
     min_count: 11                   # minimum number of small transactions needed to flag this pattern

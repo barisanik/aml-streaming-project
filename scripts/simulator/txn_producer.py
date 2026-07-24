@@ -55,7 +55,7 @@ PROFILES_PATH = Path(__file__).resolve().parent.parent / "simulator" / "profiles
 SHARED_DIR = PROJECT_ROOT / "shared"
 
 sys.path.insert(0, str(SHARED_DIR))
-from schemas import Channel, Transaction, TxnType, ScenarioType
+from schemas import Channel, Transaction, TxnType
 
 # Logging parameters
 logging.basicConfig(
@@ -69,10 +69,12 @@ logging.basicConfig(
 
 # Reads profile_config.yml.
 def load_config(path: Path) -> dict:
+    """Loads yaml files specificly."""
     with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 def load_profiles(path: Path) -> dict:
+    """Loads json files specificly."""
     with open(path, "r", encoding="utf-8") as f:
         json_file = json.load(f)
         return json_file
@@ -83,8 +85,9 @@ scenario = load_config(SCN_CONFIG_PATH)
 profiles = load_profiles(PROFILES_PATH)
 
 ## SEED
+# Set seed for reproducability.
 seed = config["reproducibility"]["seed"]
-random.seed(seed)  # Seed set for reproducability.
+random.seed(seed)
 np.random.seed(seed)
 Faker.seed(seed)
 
@@ -95,13 +98,12 @@ fake = Faker()
 time_compression_factor = config["time_model"]["time_compression_factor"]
 simulation_start_time = datetime.fromisoformat(config["time_model"]["simulation_start"])
 
+## Transaction Distribution Parameters
 txn_distribution_type = config["hourly_intensity_multiplier"]["type"]
 peak_transaction_hour = config["hourly_intensity_multiplier"]["peak_hour"]
 trough_transaction_hour = config["hourly_intensity_multiplier"]["trough_hour"]
 amplitude = config["hourly_intensity_multiplier"]["amplitude"]
 baseline = config["hourly_intensity_multiplier"]["baseline"]
-
-## Sampling Parameters
 daily_transaction_limit = config["volume"]["target_transactions_per_simulated_day"]
 base_rate_per_second = config["arrival_process"]["base_rate_per_second"]    # average wait time between transactions for exponential distribution
 
@@ -113,6 +115,7 @@ producer = confluent_kafka.Producer({
 ## FUNCTIONS
 
 def get_time_band(time):
+    """Classify time band with simulation hour to select channel."""
     time_band = ""
     if time.hour >= 7 and time.hour < 13:
         time_band = "morning"
@@ -125,12 +128,10 @@ def get_time_band(time):
     return time_band
 
 def create_wait_time(rate, time):
-
+    """Generate gaps between transactions."""
     current_time = time.hour / 24 * 2 * np.pi
     peak_hour_time = peak_transaction_hour / 24 * 2 * np.pi
 
-    min_multiplier = baseline - amplitude # 1.0 - 0.6 = 0.4
-    max_multiplier = baseline + amplitude # 1.0 + 0.6 = 1.6
     current_multiplier = baseline + amplitude * np.cos(current_time - peak_hour_time)
     effective_rate = rate * current_multiplier
 
@@ -141,17 +142,25 @@ def delivery_callback(err, msg):
     if err is not None:
         logging.error(f"Delivery failed | error={err} | key={msg.key()}")
 
-def write_answer_key(transaction_id, scenario_id, scenario_type, injected_at):
-    sql = f"INSERT INTO public.answer_key (transaction_id, scenario_id, scenario_type, injected_at) VALUES ('{transaction_id}','{scenario_id}','{scenario_type}','{injected_at}')"
-    return sql
+def write_answer_key(cur, transaction_id, scenario_id, scenario_type, injected_at):
+    """Writes transactions which belongs to a scenario to PostgreSQL's public.answer_key table."""
+    sql = """
+        INSERT INTO public.answer_key (transaction_id, scenario_id, scenario_type, injected_at)
+        VALUES (%s, %s, %s, %s)
+    """
+    cur.execute(sql, (str(transaction_id), scenario_id, scenario_type, injected_at))
 
 def create_scenario(current_sim_time, customer_profile, scenario_type):
+    """Create scenario with details using random function and scenario config."""
+    scenario_id = str(uuid.uuid4())
     series_length = random.randint(scenario_type["series_length"]["min"],scenario_type["series_length"]["max"])
     gap_min = scenario_type["inter_transaction_gap_minutes"]["min"]
     gap_max = scenario_type["inter_transaction_gap_minutes"]["max"]
     window_hours = scenario_type["window_hours"]
     window_limit = current_sim_time + timedelta(hours=window_hours)
+    forced_txn_type = scenario_type["forced_txn_type"]
 
+    # Set due times of transactions in series.
     due_times = []
     t = current_sim_time
     for _ in range(series_length):
@@ -159,30 +168,54 @@ def create_scenario(current_sim_time, customer_profile, scenario_type):
         t = t + timedelta(minutes=gap)
         due_times.append(t)
 
+    due_times.pop(0)    # Remove first due time to avoid duplicate first time transaction.
+
     # Keep all due dates in window limit
     if due_times[-1] > window_limit:
         due_times[-1] = window_limit
-    
+
+    # Format scenario details as dict.
     scenario_data = {
-        "scenario_id":str(uuid.uuid4()),
-        "current_sim_time":current_sim_time,
-        "account_id":customer_profile["account_id"],
-        "scenario_length":series_length,    # Sets a random series length
-        "scenario_type": scenario_type["name"],
-        "due_times":due_times
+        "scenario_id":          scenario_id,
+        "current_sim_time":     current_sim_time,
+        "account_id":           customer_profile["account_id"],
+        "scenario_length":      series_length,
+        "scenario_type":        scenario_type["name"],
+        "forced_txn_type":      forced_txn_type,
+        "rules":                scenario_type,
+        "due_times":            due_times
     }
-
-    def get_due_scenario(active_scenarios, current_sim_time):
-        for s in active_scenarios:
-            if s["due_times"] and s["due_times"][0] <= current_sim_time:
-                return s
-        return None
-
-    print("NEW SCENARIO")
-    print(scenario_data)
+    
+    logging.warning(f"NEW SCENARIO: {scenario_id}")
+    
     return scenario_data
 
+def get_due_scenario(active_scenarios, current_sim_time):
+    """Get oncoming due dates of active scenarios"""
+    for s in active_scenarios:
+        if s["due_times"] and s["due_times"][0] <= current_sim_time:
+            return s
+    return None
+
+def get_forced_values(scenario_details):
+    """Set forced amount and transaction type based on scenario type."""
+    rules = scenario_details["rules"]
+    scenario_type_name = scenario_details["scenario_type"]
+
+    if scenario_type_name == "structuring":
+        low = rules["threshold"] * rules["band_low_pct"]
+        high = rules["threshold"] * rules["band_high_pct"]
+        amount = random.uniform(low, high)
+    elif scenario_type_name == "smurfing":
+        amount = random.uniform(rules["min_amount"], rules["max_amount"])
+    else:
+        amount = None
+
+    return rules["forced_txn_type"], amount
+
 def create_transaction_event(current_sim_time, customer_profile, is_poisoned, scenario_details, conn):
+    """Create transaction event with details. Logs every event and save scenario related transactions to public.answer_key table."""
+
     # Get customer details
     transaction_id = uuid.uuid4()
     topic = config["topics"]["transactions_topic"]
@@ -225,16 +258,20 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
     elif txn_type in (TxnType.CASH_DEPOSIT.value, TxnType.CASH_WITHDRAWAL.value):   # Generates a random ATM ID
         counterpart_id = fake.bothify(text="ATM-########")
 
-    # Overwriting suspicious activity on transaction
+    # Overwriting ml/fraud activity on transaction
     if is_poisoned:
         cur = conn.cursor()
         try:
-            sql = write_answer_key(transaction_id=transaction_id, scenario_id=scenario_details["scenario_id"], scenario_type=scenario_details["scenario_type"], injected_at=str(datetime.now()))
-            cur.execute(sql)
+            write_answer_key(cur=cur, transaction_id=transaction_id, scenario_id=scenario_details["scenario_id"], scenario_type=scenario_details["scenario_type"], injected_at=str(datetime.now()))
         except Exception as e:
             logging.critical(f"Script failed: {e}")
         finally:
             cur.close()
+
+        forced_values = get_forced_values(scenario_details=scenario_details)
+
+        txn_type = forced_values[0]
+        amount = forced_values[1]
 
     # Formatting whole record
     event_dict = {
@@ -253,7 +290,7 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
     }
 
     try:
-        transaction = Transaction(**event_dict) # Value correctness check
+        transaction = Transaction(**event_dict)     # Validates transaction details
     except ValidationError as e:
         logging.error(f"Validation failed, transaction skipped | error={e}")
         return None
@@ -299,6 +336,7 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
 def main(current_sim_time,producer) -> None:
     logging.info(f"Simulation started at {current_sim_time}")
 
+    # Establish connection with PostgreSQL db.
     conn = psycopg2.connect(
         host=       config["postgres"]["host"],
         port=       config["postgres"]["port"],
@@ -308,32 +346,60 @@ def main(current_sim_time,producer) -> None:
     )
     conn.autocommit = True
     active_scenarios = []
+    completed_scenarios = []
 
-    for day in range(0,1):
+    for day in range(0,10):
         logging.info(f"Day: {day}")
         for i in range(0, daily_transaction_limit):
-            
-            trx_user = random.choice(profiles)
 
-            trigger_probability = random.choices([True,False],weights=[0.01, 0.99])[0]
-            scenario_details = None
-            if (trigger_probability):
-                scenario_type_names = list(scenario["scenario_types"].keys())
-                scenario_type_name = random.choice(scenario_type_names)
-                scenario_type = "structuring" # DEBUG - SİLİNECEK
-                scenario_type = scenario["scenario_types"][scenario_type_name] # Get relevant config of selected scenario type
+            due_scenario = get_due_scenario(active_scenarios, current_sim_time)
+
+            if due_scenario is not None:    # If there is an active scenario going on with oncoming due date
+                # Create next transaction in scenario
+                trx_user = next(p for p in profiles if p["account_id"] == due_scenario["account_id"])   # Find scenario user
+                due_scenario["due_times"].pop(0)  # Remove consumed due time from the queue.
+
+                create_transaction_event(current_sim_time, trx_user, is_poisoned=True, scenario_details=due_scenario, conn=conn)
+
+                # Checks if scenario is over or not. If it is, removes from active_scenarios list and append it into completed_scenarios.
+                if not due_scenario["due_times"]:
+                    active_scenarios.remove(due_scenario)
+                    completed_scenarios.append(due_scenario)
+                    logging.warning(f"SCENARIO COMPLETED: {due_scenario}")
+            else:
+                trx_user = random.choice(profiles)
+
+                trigger_possibility_true = 0.01
+                trigger_possibility_false = 0.99
+
+                # Allows maximum 5 active scenario at the same time.
+                if len(active_scenarios) == 5:
+                    trigger_possibility_true = 0
+                    trigger_possibility_false = 1
+                elif len(active_scenarios) < 5:
+                    trigger_possibility_true = 0.01
+                    trigger_possibility_false = 0.99
+
+                trigger_probability = random.choices([True,False],weights=[trigger_possibility_true, trigger_possibility_false])[0]
                 
-                # Check if randomly selected account is in an active scenario or not. If it is select another account.
-                active_account_ids = {s["account_id"] for s in active_scenarios}
-                while trx_user["account_id"] in active_account_ids:
-                    trx_user = random.choice(profiles)
+                scenario_details = None
+                # If ml/fraud scenario creation triggered
+                if (trigger_probability):
+                    scenario_type_names = list(scenario["scenario_types"].keys())   
+                    scenario_type_name = random.choice(scenario_type_names)         # Randomly pick ml/fraud scenario
+                    
+                    scenario_type = scenario["scenario_types"][scenario_type_name]  # Get relevant config of selected scenario type
+                    
+                    # Check if randomly selected account is in an active scenario or not. If it is select another account.
+                    active_account_ids = {s["account_id"] for s in active_scenarios}
+                    while trx_user["account_id"] in active_account_ids:
+                        trx_user = random.choice(profiles)
 
-                scenario_details = create_scenario(current_sim_time=current_sim_time, customer_profile=trx_user, scenario_type=scenario_type)
-                active_scenarios.append(scenario_details)
-
-            # DEBUG: Trigger prob. true çıkarsa zaten yeni senaryo başlar. Eğer çıkmazsa halihazırdaki senaryoların due date'i göz önünde bulundurularak işlemin poisoned olup olmaması kontrol edilmeli.
-            create_transaction_event(current_sim_time, trx_user, is_poisoned=trigger_probability, scenario_details=scenario_details, conn=conn)
-
+                    scenario_details = create_scenario(current_sim_time=current_sim_time, customer_profile=trx_user, scenario_type=scenario_type)
+                    active_scenarios.append(scenario_details)
+                
+                create_transaction_event(current_sim_time, trx_user, is_poisoned=trigger_probability, scenario_details=scenario_details, conn=conn)
+                
             wait_time = create_wait_time(rate=base_rate_per_second, time=current_sim_time)
             current_sim_time = current_sim_time + timedelta(seconds=wait_time)
             time.sleep(wait_time / time_compression_factor)
