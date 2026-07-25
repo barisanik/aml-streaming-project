@@ -260,14 +260,29 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
 
     # Overwriting ml/fraud activity on transaction
     if is_poisoned:
-        cur = conn.cursor()
-        try:
-            write_answer_key(cur=cur, transaction_id=transaction_id, scenario_id=scenario_details["scenario_id"], scenario_type=scenario_details["scenario_type"], injected_at=str(datetime.now()))
-        except Exception as e:
-            logging.critical(f"Script failed: {e}")
-        finally:
-            cur.close()
+        for attempt in range(3):
+            cur = conn.cursor()
 
+            try:
+                write_answer_key(
+                    cur=cur, 
+                    transaction_id=transaction_id, 
+                    scenario_id=scenario_details["scenario_id"], 
+                    scenario_type=scenario_details["scenario_type"], 
+                    injected_at=str(datetime.now())
+                )
+                cur.close()
+                break       # Break the loop if write successfull.
+            except Exception as e:
+                cur.close()
+                logging.error(f"answer_key write failed, attempt {attempt + 1}/3 | error={e}")
+                if attempt == 2:
+                    logging.critical("answer_key write failed after 3 attempts, label lost")
+                else:
+                    time.sleep(0.05)
+            finally:
+                cur.close()
+        
         forced_values = get_forced_values(scenario_details=scenario_details)
 
         txn_type = forced_values[0]
@@ -369,16 +384,13 @@ def main(current_sim_time,producer) -> None:
             else:
                 trx_user = random.choice(profiles)
 
-                trigger_possibility_true = 0.01
-                trigger_possibility_false = 0.99
-
                 # Allows maximum 5 active scenario at the same time.
                 if len(active_scenarios) == 5:
-                    trigger_possibility_true = 0
-                    trigger_possibility_false = 1
+                    trigger_possibility_true = scenario["trigger_possibility"]["capacity_full"]["true_possibility"]
+                    trigger_possibility_false = scenario["trigger_possibility"]["capacity_full"]["false_possibility"]
                 elif len(active_scenarios) < 5:
-                    trigger_possibility_true = 0.01
-                    trigger_possibility_false = 0.99
+                    trigger_possibility_true = scenario["trigger_possibility"]["capacity_available"]["true_possibility"]
+                    trigger_possibility_false = scenario["trigger_possibility"]["capacity_available"]["false_possibility"]
 
                 trigger_probability = random.choices([True,False],weights=[trigger_possibility_true, trigger_possibility_false])[0]
                 

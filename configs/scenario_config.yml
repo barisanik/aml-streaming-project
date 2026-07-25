@@ -41,3 +41,11 @@ scenario_types:
     max_amount: 1000                # upper limit for each single transaction amount
     min_amount: 50                  # lower limit for each single transaction amount
     min_count: 11                   # minimum number of small transactions needed to flag this pattern
+
+trigger_possibility:
+  capacity_available:
+    true_possibility: 0.01
+    false_possibility: 0.99
+  capacity_full:
+    true_possibility: 0
+    false_possibility: 1
