@@ -1,0 +1,31 @@
+# /configs/consumer_config.yml
+# ============================================================
+#   Config File: Consumer Config
+# ============================================================
+#   Purpose: 
+#     Parameters for txn_consumer.py.
+#
+#   Logic:
+#    - 
+#
+
+kafka:
+  bootstrap_servers: "localhost:19092"  # URL of redpanda working on Docker
+  consumer_group: "aml_txn_consumer"
+
+topics:
+  transactions_topic: "transactions"   # Redpanda topic name
+  dlq_topic: "transactions.dlq"
+
+batch:
+  max_size: 1000
+  flush_interval_ms: 500
+
+postgres:
+  host: "localhost"
+  port: 5432
+  dbname: "aml_platform"
+  user: "app_consumer"
+
+heartbeat:
+  interval_seconds: 10
