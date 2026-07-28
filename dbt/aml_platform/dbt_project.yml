@@ -1,0 +1,20 @@
+name: 'aml_platform'
+version: '1.0.0'
+
+profile: 'aml_platform'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:         # directories to be removed by `dbt clean`
+  - "target"
+  - "dbt_packages"
+
+models:
+  aml_platform:
+    example:
+      +materialized: view
