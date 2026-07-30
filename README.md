@@ -41,6 +41,10 @@ Tespit mantığı bellek içinde, analitik hesaplamalar ise SQL katmanında çal
 
 Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretilen müşteri profilleri hem işlem simülasyonunu hem de tespit tarafını besler. Fraud ve AML senaryoları (örneğin structuring, smurfing, hesap ele geçirme ve uykuda kalan hesabın aniden aktifleşmesi) bilinçli olarak akışa enjekte edilir ve bu senaryoların gerçek etiketleri ayrı bir tabloda saklanır. Tespit sistemi bu etiketlere hiçbir şekilde erişemez, böylece sistemin başarısı gerçek ve önyargısız bir şekilde ölçülebilir.
 
+## Varlık İlişki Diyagramı
+
+<img width="781" height="752" alt="AML-ERD" src="https://github.com/user-attachments/assets/ff189e8c-97c7-4600-a3a0-fd35f6b2fe28" />
+
 ## Kurulum
 
 ```bash
@@ -109,6 +113,10 @@ Detection logic runs in memory, while analytical calculations run in the SQL lay
 ## Data Source
 
 All data in the platform is synthetic, no real transaction data is used. The generated customer profiles feed both the transaction simulation and the detection side. Fraud and AML scenarios (such as structuring, smurfing, account takeover, and a dormant account suddenly becoming active) are deliberately injected into the stream, and the true labels for these scenarios are stored in a separate table. The detection system has no access to these labels, so the system's performance can be measured fairly and without bias.
+
+## Entity-Relationship Diagram
+
+<img width="781" height="752" alt="AML-ERD" src="https://github.com/user-attachments/assets/ff189e8c-97c7-4600-a3a0-fd35f6b2fe28" />
 
 ## Initialization
 
