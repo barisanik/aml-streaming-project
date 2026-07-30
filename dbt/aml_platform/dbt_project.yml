@@ -1,6 +1,5 @@
 name: 'aml_platform'
 version: '1.0.0'
-
 profile: 'aml_platform'
 
 model-paths: ["models"]
@@ -9,6 +8,8 @@ test-paths: ["tests"]
 seed-paths: ["seeds"]
 macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
+vars:
+  lookback_mins: 15
 
 clean-targets:         # directories to be removed by `dbt clean`
   - "target"
@@ -16,5 +17,5 @@ clean-targets:         # directories to be removed by `dbt clean`
 
 models:
   aml_platform:
-    example:
-      +materialized: view
+    staging:
+      +materialized: incremental
