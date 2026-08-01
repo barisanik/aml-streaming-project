@@ -23,7 +23,7 @@ CREATE SCHEMA IF NOT EXISTS ops;
 CREATE TABLE IF NOT EXISTS raw.transactions (
     transaction_id      UUID PRIMARY KEY,
     account_id          UUID NOT NULL,
-    counterparty_id     UUID,
+    counterparty_id     TEXT,
     amount              NUMERIC(18, 2) NOT NULL,
     currency            TEXT NOT NULL,
     txn_type            TEXT NOT NULL CHECK (
