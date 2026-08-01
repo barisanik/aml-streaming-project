@@ -51,6 +51,10 @@ Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretile
 # Altyapı servislerini ayağa kaldır (Redpanda, Postgres, Grafana)
 docker compose up -d
 
+# Environment dosyasının içeriğini düzenle
+# '.env-Sample' dosyasının adını '.env' olarak değiştir.
+# [POSTGRES_USERNAME] gibi köşeli parantezle belirtilen kullanıcı adlarını ve şifreleri belirle.
+
 # Python sanal ortamını kur
 python -m venv venv
 
@@ -131,6 +135,10 @@ All data in the platform is synthetic, no real transaction data is used. The gen
 ```bash
 # Start the infrastructure services (Redpanda, Postgres, Grafana)
 docker compose up -d
+
+# Modify environment file
+# Rename '.env-Sample' file as '.env'.
+# Replace placeholders marked by square brackets such as [POSTGRES_USERNAME] with actuall password and username.
 
 # Set up the Python environment
 python -m venv venv
