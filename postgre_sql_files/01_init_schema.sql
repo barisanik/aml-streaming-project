@@ -20,7 +20,8 @@ CREATE SCHEMA IF NOT EXISTS ops;
     =========================================================
 */
 -- Transactions
-CREATE TABLE IF NOT EXISTS raw.transactions (
+DROP TABLE IF EXISTS raw.transactions;
+CREATE TABLE raw.transactions (
     transaction_id      UUID PRIMARY KEY,
     account_id          UUID NOT NULL,
     counterparty_id     TEXT,
@@ -49,7 +50,8 @@ CREATE INDEX IF NOT EXISTS idx_raw_transactions_account_event
     ON raw.transactions (account_id, event_time);
 
 -- Alerts
-CREATE TABLE IF NOT EXISTS raw.alerts (
+DROP TABLE IF EXISTS raw.alerts;
+CREATE TABLE raw.alerts (
     alert_id             UUID PRIMARY KEY,
     transaction_id       UUID NOT NULL,
     account_id           UUID NOT NULL,
@@ -69,7 +71,8 @@ CREATE INDEX IF NOT EXISTS idx_raw_alerts_transaction_id
     ON raw.alerts (transaction_id);
 
 -- Answer_key
-CREATE TABLE IF NOT EXISTS public.answer_key (
+DROP TABLE IF EXISTS public.answer_key;
+CREATE TABLE public.answer_key (
     transaction_id  UUID PRIMARY KEY,
     scenario_id     UUID NOT NULL,
     scenario_type   TEXT NOT NULL CHECK (
@@ -82,7 +85,8 @@ CREATE TABLE IF NOT EXISTS public.answer_key (
 );
 
 -- Consumer Heartbeat
-CREATE TABLE IF NOT EXISTS ops.consumer_heartbeat (
+DROP TABLE IF EXISTS ops.consumer_heartbeat;
+CREATE TABLE ops.consumer_heartbeat (
     consumer_group      TEXT NOT NULL,
     topic               TEXT NOT NULL,
     partition           INTEGER NOT NULL,
