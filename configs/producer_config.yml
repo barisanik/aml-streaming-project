@@ -62,6 +62,11 @@ transaction_type_weights:
 
 topics:
   transactions_topic: "transactions"   # Redpanda topic name
+  transactions_partitions: 3
+  alerts_topic: "alerts"
+  alerts_partitions: 1
+  dlq_topic: "transactions.dlq"
+  dlq_partitions: 1
  
 currencies:
   TR: "TRY"
@@ -69,7 +74,7 @@ currencies:
   GB: "GBP"
 
 kafka:
-  bootstrap_servers: "localhost:19092"  # URL of redpanda working on Docker
+  bootstrap_servers: "127.0.0.1:19092"  # URL of redpanda working on Docker
 
 profiles_source:
   path: "profiles.json"   # output of profile_gen.py, read by producer for profile-driven generation
