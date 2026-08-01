@@ -51,9 +51,14 @@ Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretile
 # Altyapı servislerini ayağa kaldır (Redpanda, Postgres, Grafana)
 docker compose up -d
 
-# Python ortamını hazırla
+# Python sanal ortamını kur
 python -m venv venv
-venv\Scripts\activate
+
+# Sanal ortamı aktive et
+venv\Scripts\activate (Windows için)
+source venv/bin/activate (Mac için)
+
+# Gerekli kütüphanelerin kurulumunu yap
 pip install -r requirements.txt
 
 # Müşteri profillerini üret (tek seferlik)
@@ -61,6 +66,9 @@ python scripts/simulator/profile_gen.py
 
 # İşlem üreticiyi başlat
 python scripts/simulator/txn_producer.py
+
+# İşlem dinleyiciyi başlat
+python scripts/simulator/txn_consumer.py
 ```
 
 ## Proje Kararları
@@ -126,7 +134,12 @@ docker compose up -d
 
 # Set up the Python environment
 python -m venv venv
-venv\Scripts\activate
+
+# Activate virtual environment
+venv\Scripts\activate (for Windows)
+source venv/bin/activate (for Mac)
+
+# Install necessary libraries
 pip install -r requirements.txt
 
 # Generate customer profiles (one time only)
@@ -134,6 +147,9 @@ python scripts/simulator/profile_gen.py
 
 # Start the transaction producer
 python scripts/simulator/txn_producer.py
+
+# Start the transaction listener
+python scripts/simulator/txn_consumer.py
 ```
 
 ## Project Decisions
