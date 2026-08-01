@@ -48,30 +48,40 @@ Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretile
 ## Kurulum
 
 ```bash
-# Altyapı servislerini ayağa kaldır (Redpanda, Postgres, Grafana)
-docker compose up -d
-
-# Environment dosyasının içeriğini düzenle
+# 1. Environment dosyasının içeriğini düzenle
 # '.env-Sample' dosyasının adını '.env' olarak değiştir.
 # [POSTGRES_USERNAME] gibi köşeli parantezle belirtilen kullanıcı adlarını ve şifreleri belirle.
 
-# Python sanal ortamını kur
+# 2. Python sanal ortamını kur
 python -m venv venv
 
-# Sanal ortamı aktive et
+# 3. Sanal ortamı aktive et
 venv\Scripts\activate (Windows için)
 source venv/bin/activate (Mac için)
 
-# Gerekli kütüphanelerin kurulumunu yap
+# 4. Gerekli kütüphanelerin kurulumunu yap
 pip install -r requirements.txt
 
-# Müşteri profillerini üret (tek seferlik)
+# 5. Altyapı servislerini ayağa kaldır (Redpanda, Postgres, Grafana)
+# ÖNEMLİ NOT: Mac bilgisayarınızda halihazırda PostgreSQL kurulu ise Docker'da ayağa kalkacak PostgreSQL'için tanımlanan port'u (docker-compose.yml dosyasında, postgres/ports altında yer alır) değiştirmeyi unutmayın.
+docker compose up -d
+
+# 6. Veri tabanı kurulumu için DDL'i çalıştır
+python scripts/postgres/exec_01_init.py
+
+# 7. Veri tabanı kullanıcıları için şifrelerin atanmasını sağla
+python scripts/postgres/set_role_passwords.py
+
+# 8. Veri tabanı kurulumunu doğrula (isteğe bağlı)
+python scripts/postgres/verify_01_init_ddl.py
+
+# 9. Müşteri profillerini üret (tek seferlik)
 python scripts/simulator/profile_gen.py
 
-# İşlem üreticiyi başlat
+# 10. İşlem üreticiyi başlat
 python scripts/simulator/txn_producer.py
 
-# İşlem dinleyiciyi başlat
+# 11. İşlem tüketiciyi başlat
 python scripts/simulator/txn_consumer.py
 ```
 
@@ -133,30 +143,40 @@ All data in the platform is synthetic, no real transaction data is used. The gen
 ## Initialization
 
 ```bash
-# Start the infrastructure services (Redpanda, Postgres, Grafana)
-docker compose up -d
-
-# Modify environment file
+# 1. Modify environment file
 # Rename '.env-Sample' file as '.env'.
-# Replace placeholders marked by square brackets such as [POSTGRES_USERNAME] with actuall password and username.
+# Replace placeholders marked by square brackets such as [POSTGRES_USERNAME] with actual password and username.
 
-# Set up the Python environment
+# 2. Set up the Python environment
 python -m venv venv
 
-# Activate virtual environment
+# 3. Activate virtual environment
 venv\Scripts\activate (for Windows)
 source venv/bin/activate (for Mac)
 
-# Install necessary libraries
+# 4. Install necessary libraries
 pip install -r requirements.txt
 
-# Generate customer profiles (one time only)
+# 5. Start the infrastructure services (Redpanda, Postgres, Grafana)
+# WARNING: If you already installed a PostgreSQL on your Mac do not forget to change port of PostgreSQL service on docker-compose.yml (postgres/ports).
+docker compose up -d
+
+# 6. Run DDL script for setup of database
+python scripts/postgres/exec_01_init.py
+
+# 7. Execute password set script for database users
+python scripts/postgres/set_role_passwords.py
+
+# 8. Verify database initalization (optional)
+python scripts/postgres/verify_01_init_ddl.py
+
+# 9. Generate customer profiles (one time only)
 python scripts/simulator/profile_gen.py
 
-# Start the transaction producer
+# 10. Start the transaction producer
 python scripts/simulator/txn_producer.py
 
-# Start the transaction listener
+# 11. Start the transaction consumer
 python scripts/simulator/txn_consumer.py
 ```
 
