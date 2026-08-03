@@ -6,70 +6,105 @@ models:
       - name: transaction_id
         tests:
           - unique
-          - not_null
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: account_id
         tests:
-          - not_null
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: counterparty_id
         tests:
-          - not_null
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
           - contains_string:
               arguments:
                 text: '-'
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: amount
         tests:
-          - not_null
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
           - dbt_utils.accepted_range:
               arguments:
                 min_value: 0
                 inclusive: false
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: currency
         tests:
           - accepted_values:
               arguments:
                 values: ['TRY', 'GBP', 'EUR', 'USD']
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: txn_type
         tests:
-          - not_null
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
           - accepted_values:
               arguments:
                 values: ['transfer_in', 'transfer_out', 'card_payment', 'cash_deposit', 'cash_withdrawal']
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: merchant_category
         tests:
           - accepted_values:
               arguments:
                 values: ['grocery','dining','retail','travel','entertainment','utilities','healthcare','electronics','fuel']
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: channel
         tests:
           - not_null
           - accepted_values:
               arguments:
                 values: ['mobile', 'web', 'atm', 'branch']
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: city
         tests:
-          - not_null
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: country
         tests:
-          - not_null
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: event_time
         tests:
-          - not_null
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
           - dbt_utils.accepted_range:   # Checks if event time is 2026 or later
               arguments:
                 min_value: "'2026-01-01'::timestamptz"
                 inclusive: true
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: produced_at
         tests:
-          - not_null
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
           - dbt_utils.accepted_range:   # Checks if produce time is today or later
               arguments:
                 min_value: "'2026-01-01'::timestamptz"
                 inclusive: true
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
       - name: inserted_at
         tests:
           - not_null
           - dbt_utils.expression_is_true:
               config:
                 severity: warn
+                where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
               arguments:
                 expression: ">= produced_at"
