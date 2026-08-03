@@ -14,6 +14,7 @@
 */
 CREATE SCHEMA IF NOT EXISTS raw;
 CREATE SCHEMA IF NOT EXISTS ops;
+CREATE SCHEMA IF NOT EXISTS analytics;
 
 /*  =========================================================
       2. TABLES
@@ -150,3 +151,5 @@ GRANT SELECT ON raw.transactions, raw.alerts, public.answer_key, ops.consumer_he
 GRANT SELECT ON raw.transactions, raw.alerts, ops.consumer_heartbeat TO app_grafana;
 -- Grafana panels never expose answer_key
 REVOKE ALL ON public.answer_key FROM app_grafana;
+-- analytics schema permission for app_dbt user.
+GRANT USAGE, CREATE ON SCHEMA analytics TO app_dbt;

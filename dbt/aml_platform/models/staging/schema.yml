@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: stg_transactions
+    columns:
+      - name: transaction_id
+        tests:
+          - unique
+          - not_null
+      - name: txn_type
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['transfer_in', 'transfer_out', 'card_payment', 'cash_deposit', 'cash_withdrawal']
+      - name: channel
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['mobile', 'web', 'atm', 'branch']
+      - name: account_id
+        tests:
+        - not_null
+      - name: amount
+        tests:
+          - not_null
+      - name: event_time
+        tests:
+          - not_null
+      
