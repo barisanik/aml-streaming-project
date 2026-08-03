@@ -7,23 +7,69 @@ models:
         tests:
           - unique
           - not_null
+      - name: account_id
+        tests:
+          - not_null
+      - name: counterparty_id
+        tests:
+          - not_null
+          - contains_string:
+              arguments:
+                text: '-'
+      - name: amount
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: false
+      - name: currency
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['TRY', 'GBP', 'EUR', 'USD']
       - name: txn_type
         tests:
+          - not_null
           - accepted_values:
               arguments:
                 values: ['transfer_in', 'transfer_out', 'card_payment', 'cash_deposit', 'cash_withdrawal']
-      - name: channel
+      - name: merchant_category
         tests:
           - accepted_values:
               arguments:
-                values: ['mobile', 'web', 'atm', 'branch']
-      - name: account_id
+                values: ['grocery','dining','retail','travel','entertainment','utilities','healthcare','electronics','fuel']
+      - name: channel
         tests:
-        - not_null
-      - name: amount
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['mobile', 'web', 'atm', 'branch']
+      - name: city
+        tests:
+          - not_null
+      - name: country
         tests:
           - not_null
       - name: event_time
         tests:
           - not_null
-      
+          - dbt_utils.accepted_range:   # Checks if event time is 2026 or later
+              arguments:
+                min_value: "'2026-01-01'::timestamptz"
+                inclusive: true
+      - name: produced_at
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:   # Checks if produce time is today or later
+              arguments:
+                min_value: "'2026-01-01'::timestamptz"
+                inclusive: true
+      - name: inserted_at
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              config:
+                severity: warn
+              arguments:
+                expression: ">= produced_at"
