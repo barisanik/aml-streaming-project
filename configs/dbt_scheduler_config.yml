@@ -1,0 +1,11 @@
+# /configs/dbt_scheduler_config.yml
+# ============================================================
+#   Config File: DBT Scheduler Config
+# ============================================================
+#   Purpose: 
+#     Parameters for dbt_scheduler.py.
+#
+
+loop:
+  max_retries: 3
+  run_interval_seconds: 60
