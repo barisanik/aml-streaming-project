@@ -75,13 +75,17 @@ python scripts/postgres/set_role_passwords.py
 # 8. Veri tabanı kurulumunu doğrula (isteğe bağlı)
 python scripts/postgres/verify_01_init_ddl.py
 
-# 9. Müşteri profillerini üret (tek seferlik)
+# 9. Müşteri profillerini üret (tek seferlik işlem)
 python scripts/simulator/profile_gen.py
 
-# 10. İşlem üreticiyi başlat
+# 10. dbt paketlerini kur (tek seferlik işlem)
+cd [DBT_PROJE_KLASÖRÜ] # cd .\dbt\aml_platform\
+dpt deps
+
+# 11. İşlem üreticiyi başlat
 python scripts/simulator/txn_producer.py
 
-# 11. İşlem tüketiciyi başlat
+# 12. İşlem tüketiciyi başlat
 python scripts/simulator/txn_consumer.py
 ```
 
@@ -173,10 +177,14 @@ python scripts/postgres/verify_01_init_ddl.py
 # 9. Generate customer profiles (one time only)
 python scripts/simulator/profile_gen.py
 
-# 10. Start the transaction producer
+# 10. install dbt packages (one time only)
+cd [DBT_PROJECT_ROOT] # cd .\dbt\aml_platform\
+dpt deps
+
+# 11. Start the transaction producer
 python scripts/simulator/txn_producer.py
 
-# 11. Start the transaction consumer
+# 12. Start the transaction consumer
 python scripts/simulator/txn_consumer.py
 ```
 
