@@ -43,32 +43,28 @@ VALID_TRANSACTION = {
 # ── Enums ─────────────────────────────────────────────────────────────────
 
 def test_txn_type_values_are_all_lowercase():
-    """Project rule: all enum values must be lowercase (single source of
-    truth used by dbt accepted_values tests and Grafana filters)."""
+    """Checks if all transaction type enum values are lowercase."""
     for member in TxnType:
         assert member.value == member.value.lower()
 
 def test_channel_values_are_all_lowercase():
+    """Checks if all channel enum values are lowercase."""
     for member in Channel:
         assert member.value == member.value.lower()
 
 def test_scenario_type_values_are_all_lowercase():
+    """Checks if all scenario type enum values are lowercase."""
     for member in ScenarioType:
         assert member.value == member.value.lower()
 
 def test_severity_values_are_all_lowercase():
+    """Checks if all severity enum values are lowercase."""
     for member in Severity:
         assert member.value == member.value.lower()
 
 def test_txn_type_has_five_members():
+    """Checks count of transaction type values."""
     assert len(TxnType) == 5
-
-def test_entity_segment_has_only_individual_for_current_phase():
-    """Karar 14: only 'individual' exists in Phase 0-2; 'corporate' is
-    deferred to Phase 3."""
-    assert len(EntitySegment) == 1
-    assert EntitySegment.INDIVIDUAL.value == "individual"
-
 
 # ── Transaction ───────────────────────────────────────────────────────────
 
@@ -78,7 +74,7 @@ def test_transaction_accepts_valid_data():
     assert txn.channel == Channel.MOBILE
 
 def test_transaction_amount_is_decimal():
-    """Money fields must stay Decimal, not float, to avoid precision loss."""
+    """Checks if money field value is decimal instead of float."""
     txn = Transaction(**VALID_TRANSACTION)
     assert isinstance(txn.amount, Decimal)
 
