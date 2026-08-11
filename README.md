@@ -9,20 +9,20 @@ Sistem işlemleri saniyeler içinde değerlendirir, şüpheli davranış kalıpl
 
 ## Kullanılan Teknolojiler
 
-| Katman | Teknoloji |
-|---|---|
-| Mesaj sistemi | Redpanda |
-| Streaming client | Python `confluent-kafka` |
-| Şema ve validasyon | `pydantic` |
-| Simülasyon | Python (`faker` ve `numpy`) |
-| Sıcak veri | PostgreSQL |
-| Dönüşüm | dbt-postgres, incremental modeller |
-| Durum yönetimi | Redis (Docker) |
-| İzleme | Grafana (Postgres'i veri kaynağı olarak kulanır) |
-| Bildirim | Slack ve/veya SMTP |
-| Test | pytest |
-| CI/CD | GitHub Actions |
-| Container | Docker Compose |
+| Katman | Teknoloji | Durum |
+|---|---|---|
+| Mesaj sistemi | Redpanda | Tamamlandı |
+| Streaming client | Python `confluent-kafka` | Tamamlandı |
+| Şema ve validasyon | `pydantic` | Tamamlandı |
+| Simülasyon | Python (`faker` ve `numpy`) | Tamamlandı |
+| Veri depolama | PostgreSQL | Tamamlandı |
+| Dönüşüm | dbt-postgres, incremental modeller | Tamamlandı |
+| Durum yönetimi | Redis (Docker) | Planlandı |
+| İzleme | Grafana (Postgres'i veri kaynağı olarak kulanır) | Planlandı |
+| Bildirim | Slack ve/veya SMTP | Planlandı |
+| Test | pytest | Tamamlandı |
+| CI/CD | GitHub Actions | Tamamlandı |
+| Container | Docker Compose | Tamamlandı |
 
 ## Mimari
 
@@ -66,27 +66,33 @@ pip install -r requirements.txt
 # ÖNEMLİ NOT: Mac bilgisayarınızda halihazırda PostgreSQL kurulu ise Docker'da ayağa kalkacak PostgreSQL'için tanımlanan port'u (docker-compose.yml dosyasında, postgres/ports altında yer alır) değiştirmeyi unutmayın.
 docker compose up -d
 
-# 6. Veri tabanı kurulumu için DDL'i çalıştır
+# 6. Redpanda topic'lerini oluştur
+python scripts/redpanda/create_topics.py
+
+# 7. Veri tabanı kurulumu için DDL'i çalıştır
 python scripts/postgres/exec_01_init.py
 
-# 7. Veri tabanı kullanıcıları için şifrelerin atanmasını sağla
+# 8. Veri tabanı kullanıcıları için şifrelerin atanmasını sağla
 python scripts/postgres/set_role_passwords.py
 
-# 8. Veri tabanı kurulumunu doğrula (isteğe bağlı)
+# 9. Veri tabanı kurulumunu doğrula (isteğe bağlı)
 python scripts/postgres/verify_01_init_ddl.py
 
-# 9. Müşteri profillerini üret (tek seferlik işlem)
+# 10. Müşteri profillerini üret (tek seferlik işlem)
 python scripts/simulator/profile_gen.py
 
-# 10. dbt paketlerini kur (tek seferlik işlem)
+# 11. dbt paketlerini kur (tek seferlik işlem)
 cd [DBT_PROJE_KLASÖRÜ] # cd .\dbt\aml_platform\
-dpt deps
+dbt deps
 
-# 11. İşlem üreticiyi başlat
+# 12. İşlem üreticiyi başlat
 python scripts/simulator/txn_producer.py
 
-# 12. İşlem tüketiciyi başlat
+# 13. İşlem tüketiciyi başlat
 python scripts/simulator/txn_consumer.py
+
+# 14. dbt scheduler'ı başlat (60 saniyede bir dbt run + test tetikler)
+python scripts/dbt/dbt_scheduler.py
 ```
 
 ## Proje Kararları
@@ -108,20 +114,20 @@ The system evaluates transactions within seconds, catches suspicious behavior pa
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Messaging | Redpanda |
-| Streaming client | Python `confluent-kafka` |
-| Schema and validation | `pydantic` |
-| Simulation | Python (`faker` and `numpy`) |
-| Hot storage | PostgreSQL |
-| Transformation | dbt-postgres, incremental models |
-| State management | Redis |
-| Monitoring | Grafana (using PostgreSQL data source) |
-| Notification | Slack and/or SMTP |
-| Testing | pytest |
-| CI/CD | GitHub Actions |
-| Container | Docker Compose |
+| Layer | Technology | Status |
+|---|---|---|
+| Messaging | Redpanda | Done |
+| Streaming client | Python `confluent-kafka` | Done |
+| Schema and validation | `pydantic` | Done |
+| Simulation | Python (`faker` and `numpy`) | Done |
+| Data storage | PostgreSQL | Done |
+| Transformation | dbt-postgres, incremental models | Done |
+| State management | Redis | Planned |
+| Monitoring | Grafana (using PostgreSQL data source) | Planned |
+| Notification | Slack and/or SMTP | Planned |
+| Testing | pytest | Done |
+| CI/CD | GitHub Actions | Done |
+| Container | Docker Compose | Done |
 
 ## Architecture
 
@@ -165,27 +171,33 @@ pip install -r requirements.txt
 # WARNING: If you already installed a PostgreSQL on your Mac do not forget to change port of PostgreSQL service on docker-compose.yml (postgres/ports).
 docker compose up -d
 
-# 6. Run DDL script for setup of database
+# 6. Create Redpanda topics
+python scripts/redpanda/create_topics.py
+
+# 7. Run DDL script for setup of database
 python scripts/postgres/exec_01_init.py
 
-# 7. Execute password set script for database users
+# 8. Execute password set script for database users
 python scripts/postgres/set_role_passwords.py
 
-# 8. Verify database initalization (optional)
+# 9. Verify database initalization (optional)
 python scripts/postgres/verify_01_init_ddl.py
 
-# 9. Generate customer profiles (one time only)
+# 10. Generate customer profiles (one time only)
 python scripts/simulator/profile_gen.py
 
-# 10. install dbt packages (one time only)
+# 11. install dbt packages (one time only)
 cd [DBT_PROJECT_ROOT] # cd .\dbt\aml_platform\
-dpt deps
+dbt deps
 
-# 11. Start the transaction producer
+# 12. Start the transaction producer
 python scripts/simulator/txn_producer.py
 
-# 12. Start the transaction consumer
+# 13. Start the transaction consumer
 python scripts/simulator/txn_consumer.py
+
+# 14. Start the dbt scheduler (triggers dbt run + test every 60 seconds.)
+python scripts/dbt/dbt_scheduler.py
 ```
 
 ## Project Decisions
