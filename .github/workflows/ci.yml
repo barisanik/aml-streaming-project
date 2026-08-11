@@ -1,0 +1,68 @@
+# ============================================================
+#  .github/workflows/ci.yml
+#
+#  Purpose: CI pipeline for the aml-streaming-project.
+#
+#  Jobs:
+#    1. test:       Runs unit tests (mocked, no DB required).
+#    2. dbt-parse:  Validates dbt project structure without a DB connection.
+#
+#  Trigger conditions:
+#    - push / pull_request: to main branch
+#
+# ============================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate profiles.json
+        run: python scripts/simulator/profile_gen.py
+
+      - name: Run pytest
+        run: pytest
+
+  dbt-parse: # Validates dbt project structure without a live database connection.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install dbt packages
+        working-directory: dbt/aml_platform
+        run: dbt deps
+
+      - name: Parse dbt project
+        working-directory: dbt/aml_platform
+        run: dbt parse
+        env:
+          APP_DBT_DB_PASSWORD: placeholder
