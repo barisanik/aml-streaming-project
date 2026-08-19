@@ -44,6 +44,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)      # Create logs folder if it does 
 
 # Config Paths
 CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "consumer_config.yml"
+WINDOW_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "window_config.yml"
 SHARED_DIR = PROJECT_ROOT / "shared"
 
 sys.path.insert(0, str(SHARED_DIR))
