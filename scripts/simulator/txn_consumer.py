@@ -45,10 +45,14 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)      # Create logs folder if it does 
 # Config Paths
 CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "consumer_config.yml"
 WINDOW_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "window_config.yml"
+DETECTOR_DIR = Path(__file__).resolve().parent.parent.parent / "scripts" / "detector"
 SHARED_DIR = PROJECT_ROOT / "shared"
 
 sys.path.insert(0, str(SHARED_DIR))
+sys.path.insert(0, str(DETECTOR_DIR))
+
 from schemas import Channel, Transaction, TxnType
+from window_state import WindowState
 
 # Logging parameters
 logging.basicConfig(
@@ -69,6 +73,8 @@ def load_config(path: Path) -> dict:
 config = load_config(CONFIG_PATH)
 dlq_topic = config["topics"]["dlq_topic"]
 heartbeat_interval_seconds = config["heartbeat"]["interval_seconds"]
+window_config = load_config(WINDOW_CONFIG_PATH)
+window_config = window_config["window_length"]
 
 # Consumer Config Parameters
 consumer_group = config["kafka"]["consumer_group"]
@@ -201,6 +207,8 @@ def main() -> None:
     )
     conn.autocommit = True
 
+    window_state = WindowState(window_config)
+
     logging.info("Consumer started")
     buffer = [] # Transaction buffer
     last_flush_time = datetime.now()
@@ -245,6 +253,9 @@ def main() -> None:
 
             buffer.append(transaction)  # Add transaction to buffer, waiting for flush on batch max size limit or flush interval.
 
+            window_state.add_transaction("structuring", transaction)
+            window_state.add_transaction("smurfing", transaction)
+            
             partition = msg.partition() # Get partition number from Kafka.
             messages_processed_by_partition[partition] = messages_processed_by_partition.get(partition, 0) + 1  # Increase per-partition processed message count.
 

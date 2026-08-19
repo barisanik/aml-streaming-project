@@ -57,7 +57,7 @@ class WindowState:
         if transaction.account_id not in account_windows:
             account_windows[transaction.account_id] = deque()
 
-        self.clear_old_transactions(rule_family=rule_family, account_id=transaction.account_id, current_time=datetime.now())
+        self.clear_old_transactions(rule_family=rule_family, account_id=transaction.account_id, current_time=transaction.event_time)
         transaction_existance = self.check_if_transaction_exists(rule_family, transaction)
 
         if not transaction_existance:
