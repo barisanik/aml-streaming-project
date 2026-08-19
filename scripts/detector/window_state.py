@@ -48,13 +48,16 @@ class WindowState:
         
     def add_transaction(self, rule_family, transaction) -> None:
         """Add new transaction to user's deque."""
+
+        if rule_family not in self.windows:
+            raise ValueError(f"Unknown rule family: {rule_family}")
+
         account_windows = self.windows[rule_family]
 
         if transaction.account_id not in account_windows:
             account_windows[transaction.account_id] = deque()
 
         self.clear_old_transactions(rule_family=rule_family, account_id=transaction.account_id, current_time=datetime.now())
-
         transaction_existance = self.check_if_transaction_exists(rule_family, transaction)
 
         if not transaction_existance:
