@@ -13,6 +13,8 @@ seed: 0
 
 scenario_types:
   structuring:
+    rule_id: "R-001"
+    severity: "medium"
     name: "structuring"
     forced_txn_type: "cash_deposit"
     series_length:                  # number of transactions in one scenario series
@@ -29,6 +31,8 @@ scenario_types:
     sum_multiplier: 1.0             # cumulative sum must reach at least threshold times this value
 
   smurfing:
+    rule_id: "R-002"
+    severity: "medium"
     name: "smurfing"
     forced_txn_type: "transfer_out"
     series_length:                  # number of transactions in one scenario series
