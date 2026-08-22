@@ -64,9 +64,11 @@ def check_structuring(window_state, account_id):
             filtered_transactions.append(transaction)
             total_amount += transaction.amount
 
+    is_triggered = len(filtered_transactions) >= structuring_min_count and total_amount >= structuring_threshold * structuring_sum_multiplier
+
     return (
-        len(filtered_transactions) >= structuring_min_count
-        and total_amount >= structuring_threshold * structuring_sum_multiplier
+        (is_triggered),
+        (filtered_transactions)
     )
 
 def check_smurfing(window_state, account_id):
@@ -81,6 +83,9 @@ def check_smurfing(window_state, account_id):
             filtered_transactions.append(transaction)
             total_amount += transaction.amount
 
+    is_triggered = len(filtered_transactions) >= smurfing_min_count
+
     return (
-        len(filtered_transactions) >= smurfing_min_count
+        (is_triggered),
+        (filtered_transactions)
     )

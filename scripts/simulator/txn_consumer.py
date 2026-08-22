@@ -30,7 +30,8 @@ import logging
 from dotenv import load_dotenv
 import confluent_kafka
 import psycopg2
-from psycopg2.extras import execute_values
+from psycopg2.extras import execute_values, Json
+import uuid
 
 load_dotenv()
 
@@ -45,6 +46,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)      # Create logs folder if it does 
 # Config Paths
 CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "consumer_config.yml"
 WINDOW_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "window_config.yml"
+SCENARIO_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "scenario_config.yml"
 DETECTOR_DIR = Path(__file__).resolve().parent.parent.parent / "scripts" / "detector"
 SHARED_DIR = PROJECT_ROOT / "shared"
 
@@ -53,6 +55,7 @@ sys.path.insert(0, str(DETECTOR_DIR))
 
 from schemas import Channel, Transaction, TxnType
 from window_state import WindowState
+from rule_engine import check_structuring, check_smurfing
 
 # Logging parameters
 logging.basicConfig(
@@ -73,14 +76,27 @@ def load_config(path: Path) -> dict:
 config = load_config(CONFIG_PATH)
 dlq_topic = config["topics"]["dlq_topic"]
 heartbeat_interval_seconds = config["heartbeat"]["interval_seconds"]
+
+# Window Config
 window_config = load_config(WINDOW_CONFIG_PATH)
 window_config = window_config["window_length"]
+
+# Scenario Config
+scenario_config = load_config(SCENARIO_CONFIG_PATH)
+scenario_config = scenario_config["scenario_types"]
 
 # Consumer Config Parameters
 consumer_group = config["kafka"]["consumer_group"]
 transactions_topic = config["topics"]["transactions_topic"]
 batch_max_size = config["batch"]["max_size"]
 flush_interval_ms = config["batch"]["flush_interval_ms"]
+
+# Scenario Config Parameters
+structuring_rule_id = scenario_config["structuring"]["rule_id"]
+structuring_severity = scenario_config["structuring"]["severity"]
+
+smurfing_rule_id = scenario_config["smurfing"]["rule_id"]
+smurfing_severity = scenario_config["smurfing"]["severity"]
 
 # Kafka Consumer setup
 consumer = confluent_kafka.Consumer({
@@ -195,6 +211,47 @@ def write_heartbeat(conn, consumer, consumer_group, topic, messages_processed_by
     finally:
         cur.close()
 
+def write_alert(conn, transaction, rule_id, rule_name, severity, window_summary, alert_time):
+    """Writes detected fraud to raw.alerts table."""
+    window_summary_data = [t.model_dump(mode="json") for t in window_summary]
+    
+    rows = [
+        (
+            str(uuid.uuid4()),
+            transaction.transaction_id,
+            transaction.account_id,
+            rule_id,
+            rule_name,
+            severity,
+            Json(window_summary_data),
+            transaction.event_time,
+            alert_time,
+            int((alert_time - transaction.produced_at).total_seconds() * 1000)
+        )
+    ]
+
+    sql = """
+    INSERT INTO raw.alerts (
+        alert_id, 
+        transaction_id, 
+        account_id, 
+        rule_id,
+        rule_name, 
+        severity,
+        window_summary,
+        event_time,
+        alert_time,
+        detection_latency_ms
+    )
+    VALUES %s
+    """
+
+    cur = conn.cursor()
+    try:
+        execute_values(cur, sql, rows)
+    finally:
+        cur.close()
+
 def main() -> None:
 
     ## Postgres connection setup
@@ -255,6 +312,20 @@ def main() -> None:
 
             window_state.add_transaction("structuring", transaction)
             window_state.add_transaction("smurfing", transaction)
+
+            alert_time = datetime.now()
+
+            # Check if recent activites are suspicious or not.
+            is_structuring, structuring_txns = check_structuring(window_state, transaction.account_id)
+            is_smurfing, smurfing_txns = check_smurfing(window_state, transaction.account_id)
+
+            # If it is, insert related information to raw.alerts and log them.
+            if is_structuring:
+                write_alert(conn, transaction, structuring_rule_id, "structuring", structuring_severity, structuring_txns, alert_time)
+                logging.warning(f"Structuring rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
+            if is_smurfing: 
+                write_alert(conn, transaction, smurfing_rule_id, "smurfing", smurfing_severity, smurfing_txns, alert_time)
+                logging.warning(f"Smurfing rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
             
             partition = msg.partition() # Get partition number from Kafka.
             messages_processed_by_partition[partition] = messages_processed_by_partition.get(partition, 0) + 1  # Increase per-partition processed message count.
