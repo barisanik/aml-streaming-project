@@ -58,7 +58,7 @@ def test_protection_on_invalid_rule_family():
     with pytest.raises(ValueError):
         ws.add_transaction("invalid_rule_family", valid_transaction)
 
-def test_seperation_of_rule_families():
+def test_separation_of_rule_families():
     """A transaction recorded on a specific rule family must not be seen on another rule family unless it included both families."""
     ws = WindowState(config)
     ws.add_transaction("structuring", valid_transaction)
@@ -66,7 +66,7 @@ def test_seperation_of_rule_families():
     assert len(ws.windows["structuring"]["acc-1"]) == 1
     assert "acc-1" not in ws.windows["smurfing"]
 
-def test_seperation_of_account_window_states():
+def test_separation_of_account_window_states():
     """A transaction recorded on a specific account must not be seen on another account's deque."""
     ws = WindowState(config)
     ws.add_transaction("structuring", valid_transaction)
