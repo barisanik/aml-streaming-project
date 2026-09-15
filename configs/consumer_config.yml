@@ -15,6 +15,7 @@ kafka:
 
 topics:
   transactions_topic: "transactions"   # Redpanda topic name
+  alerts_topic: "alerts"
   dlq_topic: "transactions.dlq"
 
 batch:

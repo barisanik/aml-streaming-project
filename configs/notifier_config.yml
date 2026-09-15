@@ -1,0 +1,29 @@
+# /configs/notifier_config.yml
+# ============================================================
+#   Config File: Notifier Config
+# ============================================================
+#   Purpose:
+#     Parameters for notifier.py.
+
+kafka:
+  bootstrap_servers: "127.0.0.1:19092"
+  consumer_group: "aml_notifier"
+  auto_offset_reset: "earliest"
+
+topics:
+  alerts_topic: "alerts"
+
+webhook:
+  type: "slack"
+  url_env_var: "NOTIFIER_WEBHOOK_URL"
+  timeout_seconds: 10
+  retry:
+    max_attempts: 3
+    backoff_seconds: 2
+
+smtp:
+  enabled: false
+  host: ""
+  port: 587
+  from_address: ""
+  to_addresses: []

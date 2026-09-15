@@ -53,7 +53,7 @@ SHARED_DIR = PROJECT_ROOT / "shared"
 sys.path.insert(0, str(SHARED_DIR))
 sys.path.insert(0, str(DETECTOR_DIR))
 
-from schemas import Channel, Transaction, TxnType
+from schemas import Alert, Channel, Transaction, TxnType
 from window_state import WindowState
 from rule_engine import check_structuring, check_smurfing
 
@@ -75,6 +75,7 @@ def load_config(path: Path) -> dict:
 ## CONFIGS
 config = load_config(CONFIG_PATH)
 dlq_topic = config["topics"]["dlq_topic"]
+alerts_topic = config["topics"]["alerts_topic"]
 heartbeat_interval_seconds = config["heartbeat"]["interval_seconds"]
 
 # Window Config
@@ -112,11 +113,21 @@ dlq_producer = confluent_kafka.Producer({
     "bootstrap.servers": config["kafka"]["bootstrap_servers"],
 })
 
+# Kafka producer setup for alerts
+alert_producer = confluent_kafka.Producer({
+    "bootstrap.servers": config["kafka"]["bootstrap_servers"],
+})
+
 ## FUNCTIONS
 def dlq_delivery_callback(err, msg):
     """Logs writing error of DLQ messages."""
     if err is not None:
         logging.error(f"DLQ delivery failed | error={err}")
+
+def alert_delivery_callback(err, msg):
+    """Log alert delivery errors."""
+    if err is not None:
+        logging.error(f"Alert delivery failed | error={err} | key={msg.key()}")
 
 def flush_buffer(conn, buffer):
     """Writes buffered transactions to raw.transactions in one batch insert."""
@@ -212,21 +223,37 @@ def write_heartbeat(conn, consumer, consumer_group, topic, messages_processed_by
         cur.close()
 
 def write_alert(conn, transaction, rule_id, rule_name, severity, window_summary, alert_time):
-    """Writes detected fraud to raw.alerts table."""
-    window_summary_data = [t.model_dump(mode="json") for t in window_summary]
+    """Write a detected alert to raw.alerts."""
+    window_summary_data = {
+        "transactions": [t.model_dump(mode="json") for t in window_summary]
+    }
+    alert = Alert(
+        alert_id=str(uuid.uuid4()),
+        transaction_id=transaction.transaction_id,
+        account_id=transaction.account_id,
+        rule_id=rule_id,
+        rule_name=rule_name,
+        severity=severity,
+        window_summary=window_summary_data,
+        event_time=transaction.event_time,
+        alert_time=alert_time,
+        detection_latency_ms=int(
+            (alert_time - transaction.produced_at).total_seconds() * 1000
+        ),
+    )
     
     rows = [
         (
-            str(uuid.uuid4()),
-            transaction.transaction_id,
-            transaction.account_id,
-            rule_id,
-            rule_name,
-            severity,
-            Json(window_summary_data),
-            transaction.event_time,
-            alert_time,
-            int((alert_time - transaction.produced_at).total_seconds() * 1000)
+            alert.alert_id,
+            alert.transaction_id,
+            alert.account_id,
+            alert.rule_id,
+            alert.rule_name,
+            alert.severity.value,
+            Json(alert.window_summary),
+            alert.event_time,
+            alert.alert_time,
+            alert.detection_latency_ms,
         )
     ]
 
@@ -251,6 +278,19 @@ def write_alert(conn, transaction, rule_id, rule_name, severity, window_summary,
         execute_values(cur, sql, rows)
     finally:
         cur.close()
+
+    return alert
+
+def publish_alert(producer, topic, alert):
+    """Publish a stored alert to Redpanda."""
+    payload = alert.model_dump(mode="json")
+    producer.produce(
+        topic=topic,
+        key=alert.account_id.encode("utf-8"),
+        value=json.dumps(payload).encode("utf-8"),
+        callback=alert_delivery_callback,
+    )
+    producer.poll(0)
 
 def main() -> None:
 
@@ -321,10 +361,12 @@ def main() -> None:
 
             # If it is, insert related information to raw.alerts and log them.
             if is_structuring:
-                write_alert(conn, transaction, structuring_rule_id, "structuring", structuring_severity, structuring_txns, alert_time)
+                alert = write_alert(conn, transaction, structuring_rule_id, "structuring", structuring_severity, structuring_txns, alert_time)
+                publish_alert(alert_producer, alerts_topic, alert)
                 logging.warning(f"Structuring rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
             if is_smurfing: 
-                write_alert(conn, transaction, smurfing_rule_id, "smurfing", smurfing_severity, smurfing_txns, alert_time)
+                alert = write_alert(conn, transaction, smurfing_rule_id, "smurfing", smurfing_severity, smurfing_txns, alert_time)
+                publish_alert(alert_producer, alerts_topic, alert)
                 logging.warning(f"Smurfing rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
             
             partition = msg.partition() # Get partition number from Kafka.
@@ -356,6 +398,7 @@ def main() -> None:
 
         conn.close()
         dlq_producer.flush()
+        alert_producer.flush()
         consumer.close()
         logging.info("Consumer closed")
 

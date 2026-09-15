@@ -2,6 +2,7 @@
 
 import sys
 import os
+import json
 from datetime import datetime
 from unittest.mock import patch, MagicMock
 
@@ -9,8 +10,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts', 'sim
 
 import txn_consumer
 from txn_consumer import (
+    alert_delivery_callback,
     dlq_delivery_callback,
     flush_buffer,
+    publish_alert,
+    write_alert,
     write_heartbeat,
 )
 from txn_consumer import Transaction, TxnType, Channel
@@ -50,6 +54,22 @@ def test_dlq_delivery_callback_logs_error_on_failure():
 def test_dlq_delivery_callback_does_not_log_on_success():
     with patch('txn_consumer.logging.error') as mock_error:
         dlq_delivery_callback(None, MagicMock())
+        mock_error.assert_not_called()
+
+
+# ── Function: alert_delivery_callback ────────────────────────────────────────
+
+def test_alert_delivery_callback_logs_error_on_failure():
+    msg = MagicMock()
+    msg.key.return_value = b"account-1"
+
+    with patch('txn_consumer.logging.error') as mock_error:
+        alert_delivery_callback("some kafka error", msg)
+        mock_error.assert_called_once()
+
+def test_alert_delivery_callback_does_not_log_on_success():
+    with patch('txn_consumer.logging.error') as mock_error:
+        alert_delivery_callback(None, MagicMock())
         mock_error.assert_not_called()
 
 
@@ -167,3 +187,49 @@ def test_write_heartbeat_sql_contains_upsert_on_conflict():
         _, sql, _ = mock_execute_values.call_args[0]
         assert "ON CONFLICT (consumer_group, topic, partition)" in sql
         assert "DO UPDATE SET" in sql
+
+
+# ── Function: write_alert and publish_alert ──────────────────────────────────
+
+def test_write_alert_returns_the_stored_alert():
+    conn = MagicMock()
+    transaction = build_transaction()
+    alert_time = datetime(2026, 1, 1, 12, 0, 2)
+
+    with patch('txn_consumer.execute_values') as mock_execute_values:
+        alert = write_alert(
+            conn,
+            transaction,
+            "R-001",
+            "structuring",
+            "high",
+            [transaction],
+            alert_time,
+        )
+
+    assert alert.transaction_id == transaction.transaction_id
+    assert alert.window_summary["transactions"][0]["transaction_id"] == transaction.transaction_id
+    mock_execute_values.assert_called_once()
+
+def test_publish_alert_uses_alerts_topic_and_valid_json():
+    conn = MagicMock()
+    producer = MagicMock()
+    transaction = build_transaction()
+    with patch('txn_consumer.execute_values'):
+        alert = write_alert(
+            conn,
+            transaction,
+            "R-002",
+            "smurfing",
+            "medium",
+            [transaction],
+            datetime(2026, 1, 1, 12, 0, 2),
+        )
+
+    publish_alert(producer, "alerts", alert)
+
+    produce_kwargs = producer.produce.call_args.kwargs
+    assert produce_kwargs["topic"] == "alerts"
+    assert produce_kwargs["key"] == transaction.account_id.encode("utf-8")
+    assert json.loads(produce_kwargs["value"])["alert_id"] == alert.alert_id
+    producer.poll.assert_called_once_with(0)
