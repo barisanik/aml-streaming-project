@@ -32,7 +32,7 @@ Platform altı ana bileşenden oluşur:
 2. **İşlem üretici (producer)**, bu profilleri kullanarak Poisson süreciyle işlem akışı üretir ve Redpanda'daki `transactions` topic'ine yazar. Belirli bir olasılıkla gerçekçi fraud ve AML senaryoları da bu akışa karıştırılır.
 3. **Kural motoru (consumer)**, işlemleri tüketir, pydantic ile doğrular ve hesap bazlı zaman pencereleri üzerinde kuralları değerlendirir. Doğrulanan işlemler Postgres'e yazılır. Bir kural tetiklenirse alert önce Postgres'e, sonra Redpanda'daki `alerts` topic'ine yazılır.
 4. **Bildirim servisi (notifier)**, `alerts` topic'ini manuel offset commit ile dinler; Slack veya Discord webhook'una yapılandırılabilir retry ile bildirim gönderir. Webhook hata yanıtının gövdesi loglanır. SMTP ayarı vardır, gönderim henüz uygulanmamıştır.
-5. **dbt**, ham işlemleri incremental staging modeline dönüştürür.
+5. **dbt**, ham işlemleri incremental staging modeline dönüştürür.  
 6. **Grafana**, PostgreSQL'den operasyonel metrikleri görselleştirmek üzere planlanmıştır.
 
 Tespit mantığı bellek içinde, analitik hesaplamalar ise SQL katmanında çalışır. Bu ayrım, hızlı tespit ile derinlemesine analizi birbirinden bağımsız tutar.
@@ -103,7 +103,7 @@ python scripts/dbt/dbt_scheduler.py
 - **At-least-once ve idempotency:** Mesajların en az bir kez iletilmesi garanti edilir, aynı mesajın tekrar işlenmesi durumunda veri tekrar yazılmaz.
 - **Ground-truth izolasyonu:** Enjekte edilen senaryoların türü (normal/zararlı işlem) tespit sistemine hiçbir şekilde sızmaz. Veri erişiminde ayrım veritabanı yetkilendirmesiyle sağlanır.
 - **Alert yazım sırası:** Bir alert oluştuğunda önce Postgres'e yazılır ve bu yazımın başarılı olduğu doğrulanır, ardından mesaj kuyruğuna gönderilir. Böylece iki sistem arasında tutarsızlık riski en aza indirilir.
-- **Açıklanabilir kurallar:** Structuring ve smurfing event-time sliding window'larda değerlendirilir.
+- **Tespit sistemi kuralları:** Structuring ve smurfing event-time sliding window'larda değerlendirilir.
 - **Doğrulama:** Birim testleri broker veya veritabanına bağımlı değildir.
 
 ---
@@ -213,5 +213,5 @@ python scripts/dbt/dbt_scheduler.py
 - **At-least-once and idempotency:** Message delivery is guaranteed at least once, and if a message gets processed again, it does not get written to the database twice.
 - **Ground-truth isolation:** The true labels of injected scenarios (normal/suspicious transaction) never leak into the detection system. Data access authorization is provided by database permissions.
 - **Alert write order:** When an alert is created, it is written to PostgreSQL first and this write is confirmed as successful, only then is it sent to the message queue. This keeps the risk of inconsistency between the two systems as low as possible.
-- **Explainable rules:** Structuring and smurfing run over event-time sliding windows.
+- **Detection system rules:** Structuring and smurfing run over event-time sliding windows.
 - **Verification:** Unit tests do not require a broker or database.

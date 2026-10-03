@@ -206,7 +206,7 @@ def get_forced_values(scenario_details):
         low = rules["threshold"] * rules["band_low_pct"]
         high = rules["threshold"] * rules["band_high_pct"]
         amount = random.uniform(low, high)
-    elif scenario_type_name == "smurfing":
+    elif scenario_type_name == "smurfing" or scenario_type_name == "mule_fan_in":
         amount = random.uniform(rules["min_amount"], rules["max_amount"])
     else:
         amount = None

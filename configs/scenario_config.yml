@@ -42,9 +42,27 @@ scenario_types:
       min: 10
       max: 60
     window_hours: 24                # time window to monitor for this pattern
-    max_amount: 1000                # upper limit for each single transaction amount
     min_amount: 50                  # lower limit for each single transaction amount
+    max_amount: 1000                # upper limit for each single transaction amount
     min_count: 11                   # minimum number of small transactions needed to flag this pattern
+
+  mule_fan_in:
+    rule_id: "R-003"
+    severity: "medium"
+    name: "mule_fan_in"
+    forced_txn_type: "transfer_in"
+    series_length:
+      min: 10
+      max: 15
+    inter_transaction_gap_minutes: # simulated time gap between two transactions in the series
+      min: 5
+      max: 60
+    window_hours: 24    # time window to monitor for this pattern
+    min_amount: 500     # lower limit for each single transaction amount
+    max_amount: 5000    # upper limit for each single transaction amount
+    min_count: 10       # minimum number of transactions needed to flag this pattern
+    min_distinct_counterparties: 8 # minimum number of accounts to get transactions
+    min_total_amount: 20000
 
 trigger_possibility:
   capacity_available:
