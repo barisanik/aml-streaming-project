@@ -174,6 +174,49 @@ def create_scenario(current_sim_time, customer_profile, scenario_type):
     if due_times[-1] > window_limit:
         due_times[-1] = window_limit
 
+    mule_counterparty_ids = []
+    mule_amounts = []
+    if scenario_type["name"] == "mule_fan_in":
+        # account_id is the receiving mule account.
+        # Each counterparty is a distinct source account sending a transfer_in to that same account.
+        source_account_ids = [
+            profile["account_id"]
+            for profile in profiles
+            if profile["account_id"] != customer_profile["account_id"]
+        ]
+        min_distinct_counterparties = scenario_type["min_distinct_counterparties"]
+        if len(source_account_ids) < min_distinct_counterparties:
+            raise ValueError(
+                "Mule fan-in scenario requires at least "
+                f"{min_distinct_counterparties} source accounts other than the mule account"
+            )
+        if series_length < min_distinct_counterparties:
+            raise ValueError(
+                "Mule fan-in series_length must be at least min_distinct_counterparties"
+            )
+        if series_length < scenario_type["min_count"]:
+            raise ValueError("Mule fan-in series_length must be at least min_count")
+        if scenario_type["max_amount"] * series_length < scenario_type["min_total_amount"]:
+            raise ValueError(
+                "Mule fan-in max_amount and series_length cannot meet min_total_amount"
+            )
+
+        distinct_sources = random.sample(source_account_ids, min_distinct_counterparties)
+        mule_counterparty_ids = distinct_sources + [
+            random.choice(distinct_sources)
+            for _ in range(series_length - min_distinct_counterparties)
+        ]
+        random.shuffle(mule_counterparty_ids)
+
+        amount_floor = max(
+            scenario_type["min_amount"],
+            scenario_type["min_total_amount"] / series_length,
+        )
+        mule_amounts = [
+            random.uniform(amount_floor, scenario_type["max_amount"])
+            for _ in range(series_length)
+        ]
+
     # Format scenario details as dict.
     scenario_data = {
         "scenario_id":          scenario_id,
@@ -183,7 +226,10 @@ def create_scenario(current_sim_time, customer_profile, scenario_type):
         "scenario_type":        scenario_type["name"],
         "forced_txn_type":      forced_txn_type,
         "rules":                scenario_type,
-        "due_times":            due_times
+        "due_times":            due_times,
+        "event_index":          0,
+        "mule_counterparty_ids": mule_counterparty_ids,
+        "mule_amounts":         mule_amounts,
     }
     
     logging.warning(f"NEW SCENARIO: {scenario_id}")
@@ -206,8 +252,10 @@ def get_forced_values(scenario_details):
         low = rules["threshold"] * rules["band_low_pct"]
         high = rules["threshold"] * rules["band_high_pct"]
         amount = random.uniform(low, high)
-    elif scenario_type_name == "smurfing" or scenario_type_name == "mule_fan_in":
+    elif scenario_type_name == "smurfing":
         amount = random.uniform(rules["min_amount"], rules["max_amount"])
+    elif scenario_type_name == "mule_fan_in":
+        amount = scenario_details["mule_amounts"][scenario_details["event_index"]]
     else:
         amount = None
 
@@ -246,18 +294,6 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
     else:
         currency = config["currencies"]["EU"]
 
-    # Counterparty ID generation: Randomly pick an account ID or create a merchant/an ATM ID. 
-    counterpart_id = str(uuid.uuid4())
-    if (txn_type == TxnType.TRANSFER_IN.value) or (txn_type == TxnType.TRANSFER_OUT.value):
-        counterpart_id = str(random.choice(profiles)["account_id"])
-
-        while counterpart_id == account_id:                                         # Choose random account id except transaction trigger user.
-            counterpart_id = str(random.choice(profiles)["account_id"])
-    elif txn_type == TxnType.CARD_PAYMENT.value:                                    # Generates a random merchant ID
-        counterpart_id = fake.bothify(text="MER-########")
-    elif txn_type in (TxnType.CASH_DEPOSIT.value, TxnType.CASH_WITHDRAWAL.value):   # Generates a random ATM ID
-        counterpart_id = fake.bothify(text="ATM-########")
-
     # Overwriting ml/fraud activity on transaction
     if is_poisoned:
         for attempt in range(3):
@@ -287,6 +323,20 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
 
         txn_type = forced_values[0]
         amount = forced_values[1]
+    
+    counterpart_id = str(uuid.uuid4())
+    if is_poisoned and scenario_details["scenario_type"] == "mule_fan_in":
+        counterpart_id = scenario_details["mule_counterparty_ids"][
+            scenario_details["event_index"]
+        ]
+    elif txn_type in (TxnType.TRANSFER_IN.value, TxnType.TRANSFER_OUT.value):
+        counterpart_id = str(random.choice(profiles)["account_id"])
+        while counterpart_id == account_id:
+            counterpart_id = str(random.choice(profiles)["account_id"])
+    elif txn_type == TxnType.CARD_PAYMENT.value:
+        counterpart_id = fake.bothify(text="MER-########")
+    elif txn_type in (TxnType.CASH_DEPOSIT.value, TxnType.CASH_WITHDRAWAL.value):
+        counterpart_id = fake.bothify(text="ATM-########")
 
     # Formatting whole record
     event_dict = {
@@ -319,6 +369,9 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
     )
     producer.poll(0)                                # process delivery callbacks without blocking
 
+    if is_poisoned and scenario_details["scenario_type"] == "mule_fan_in":
+        scenario_details["event_index"] += 1
+
     # Logging transaction
     logging.info(
         f"{'New transaction'                            :<14} | "
@@ -337,6 +390,7 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
     return {
         "transaction_id":   str(transaction_id),
         "account_id":       account_id,
+        "counterparty_id":  counterpart_id,
         "topic":            topic,
         "merchant_category":merchant_category,
         "amount":           amount,

@@ -55,7 +55,7 @@ sys.path.insert(0, str(DETECTOR_DIR))
 
 from schemas import Alert, Channel, Transaction, TxnType
 from window_state import WindowState
-from rule_engine import check_structuring, check_smurfing
+from rule_engine import check_mule_fan_in, check_smurfing, check_structuring, summarize_mule_fan_in
 
 # Logging parameters
 logging.basicConfig(
@@ -98,6 +98,9 @@ structuring_severity = scenario_config["structuring"]["severity"]
 
 smurfing_rule_id = scenario_config["smurfing"]["rule_id"]
 smurfing_severity = scenario_config["smurfing"]["severity"]
+
+mule_fan_in_rule_id = scenario_config["mule_fan_in"]["rule_id"]
+mule_fan_in_severity = scenario_config["mule_fan_in"]["severity"]
 
 # Kafka Consumer setup
 consumer = confluent_kafka.Consumer({
@@ -222,11 +225,13 @@ def write_heartbeat(conn, consumer, consumer_group, topic, messages_processed_by
     finally:
         cur.close()
 
-def write_alert(conn, transaction, rule_id, rule_name, severity, window_summary, alert_time):
+def write_alert(conn, transaction, rule_id, rule_name, severity, window_summary, alert_time, metrics=None):
     """Write a detected alert to raw.alerts."""
     window_summary_data = {
         "transactions": [t.model_dump(mode="json") for t in window_summary]
     }
+    if metrics is not None:
+        window_summary_data["metrics"] = metrics
     alert = Alert(
         alert_id=str(uuid.uuid4()),
         transaction_id=transaction.transaction_id,
@@ -352,12 +357,14 @@ def main() -> None:
 
             window_state.add_transaction("structuring", transaction)
             window_state.add_transaction("smurfing", transaction)
+            window_state.add_transaction("mule_fan_in", transaction)
 
             alert_time = datetime.now()
 
             # Check if recent activites are suspicious or not.
             is_structuring, structuring_txns = check_structuring(window_state, transaction.account_id)
             is_smurfing, smurfing_txns = check_smurfing(window_state, transaction.account_id)
+            is_mule_fan_in, mule_fan_in_txns = check_mule_fan_in(window_state, transaction.account_id)
 
             # If it is, insert related information to raw.alerts and log them.
             if is_structuring:
@@ -368,6 +375,19 @@ def main() -> None:
                 alert = write_alert(conn, transaction, smurfing_rule_id, "smurfing", smurfing_severity, smurfing_txns, alert_time)
                 publish_alert(alert_producer, alerts_topic, alert)
                 logging.warning(f"Smurfing rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
+            if is_mule_fan_in:
+                alert = write_alert(
+                    conn,
+                    transaction,
+                    mule_fan_in_rule_id,
+                    "mule_fan_in",
+                    mule_fan_in_severity,
+                    mule_fan_in_txns,
+                    alert_time,
+                    metrics=summarize_mule_fan_in(mule_fan_in_txns),
+                )
+                publish_alert(alert_producer, alerts_topic, alert)
+                logging.warning(f"Mule fan-in rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
             
             partition = msg.partition() # Get partition number from Kafka.
             messages_processed_by_partition[partition] = messages_processed_by_partition.get(partition, 0) + 1  # Increase per-partition processed message count.
