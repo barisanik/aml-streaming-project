@@ -43,6 +43,14 @@ OTHER_PROFILE = {
     "avg_amount_sigma": 0.5,
 }
 
+FAN_IN_PROFILES = [TEST_PROFILE] + [
+    {
+        **OTHER_PROFILE,
+        "account_id": f"00000000-0000-0000-0000-{index:012d}",
+    }
+    for index in range(1, 11)
+]
+
 FIXED_TIME = datetime(2026, 1, 1, 0, 0, 0)
 
 
@@ -115,6 +123,19 @@ def test_get_forced_values_smurfing_within_band():
     assert txn_type == "transfer_out"
     assert 50 <= amount <= 1000
 
+def test_get_forced_values_mule_fan_in_uses_planned_amount():
+    scenario_details = {
+        "scenario_type": "mule_fan_in",
+        "event_index": 1,
+        "mule_amounts": [2100.0, 2200.0],
+        "rules": {"forced_txn_type": "transfer_in"},
+    }
+
+    txn_type, amount = get_forced_values(scenario_details)
+
+    assert txn_type == "transfer_in"
+    assert amount == 2200.0
+
 def test_get_forced_values_unknown_type_returns_none_amount():
     scenario_details = {
         "scenario_type": "unknown_scenario",
@@ -169,6 +190,24 @@ def test_create_scenario_data_has_expected_keys():
         "scenario_type", "forced_txn_type", "rules", "due_times",
     }
     assert expected_keys.issubset(scenario.keys())
+
+def test_create_mule_fan_in_scenario_guarantees_rule_thresholds():
+    mule_rules = txn_producer.scenario["scenario_types"]["mule_fan_in"]
+
+    with patch.object(txn_producer, "profiles", FAN_IN_PROFILES):
+        random.seed(0)
+        scenario = create_scenario(FIXED_TIME, TEST_PROFILE, mule_rules)
+
+    assert scenario["account_id"] == TEST_PROFILE["account_id"]
+    assert scenario["scenario_length"] >= mule_rules["min_count"]
+    assert len(scenario["mule_counterparty_ids"]) == scenario["scenario_length"]
+    assert TEST_PROFILE["account_id"] not in scenario["mule_counterparty_ids"]
+    assert len(set(scenario["mule_counterparty_ids"])) >= mule_rules["min_distinct_counterparties"]
+    assert all(
+        mule_rules["min_amount"] <= amount <= mule_rules["max_amount"]
+        for amount in scenario["mule_amounts"]
+    )
+    assert sum(scenario["mule_amounts"]) >= mule_rules["min_total_amount"]
 
 
 # ── Function: get_due_scenario ───────────────────────────────────────────────
@@ -278,3 +317,30 @@ def test_create_transaction_event_poisoned_forces_scenario_txn_type_and_amount()
         sent_payload = json.loads(mock_producer.produce.call_args.kwargs["value"])
         assert sent_payload["txn_type"] == "cash_deposit"
         assert 8500 <= float(sent_payload["amount"]) <= 9900
+
+def test_create_mule_fan_in_events_keep_one_target_and_planned_sources():
+    mule_rules = txn_producer.scenario["scenario_types"]["mule_fan_in"]
+    mock_producer = MagicMock()
+
+    with patch.object(txn_producer, "profiles", FAN_IN_PROFILES), \
+         patch.object(txn_producer, "producer", mock_producer):
+        random.seed(0)
+        scenario = create_scenario(FIXED_TIME, TEST_PROFILE, mule_rules)
+        emitted_payloads = []
+
+        for _ in range(scenario["scenario_length"]):
+            result = create_transaction_event(
+                current_sim_time=FIXED_TIME,
+                customer_profile=TEST_PROFILE,
+                is_poisoned=True,
+                scenario_details=scenario,
+                conn=MagicMock(),
+            )
+            emitted_payloads.append(json.loads(mock_producer.produce.call_args.kwargs["value"]))
+            assert result["account_id"] == TEST_PROFILE["account_id"]
+
+    assert scenario["event_index"] == scenario["scenario_length"]
+    assert all(payload["account_id"] == TEST_PROFILE["account_id"] for payload in emitted_payloads)
+    assert all(payload["txn_type"] == "transfer_in" for payload in emitted_payloads)
+    assert [payload["counterparty_id"] for payload in emitted_payloads] == scenario["mule_counterparty_ids"]
+    assert sum(float(payload["amount"]) for payload in emitted_payloads) >= mule_rules["min_total_amount"]

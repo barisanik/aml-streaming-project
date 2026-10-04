@@ -21,7 +21,7 @@ sys.path.insert(0, str(DETECTOR_DIR))
 from schemas import Transaction
 from window_state import WindowState
 import rule_engine
-from rule_engine import check_structuring, check_smurfing
+from rule_engine import check_mule_fan_in, check_smurfing, check_structuring, summarize_mule_fan_in
 
 
 def load_config(path: Path) -> dict:
@@ -50,8 +50,15 @@ smurfing_limit_max = scenario_types["smurfing"]["max_amount"]
 smurfing_limit_min = scenario_types["smurfing"]["min_amount"]
 smurfing_min_count = scenario_types["smurfing"]["min_count"]
 
+# Mule fan-in
+mule_fan_in_limit_max = scenario_types["mule_fan_in"]["max_amount"]
+mule_fan_in_limit_min = scenario_types["mule_fan_in"]["min_amount"]
+mule_fan_in_min_count = scenario_types["mule_fan_in"]["min_count"]
+mule_fan_in_min_distinct_counterparties = scenario_types["mule_fan_in"]["min_distinct_counterparties"]
+mule_fan_in_min_total_amount = scenario_types["mule_fan_in"]["min_total_amount"]
 
-def create_transactions(scenario_type, scenario_config, txn_count, amounts: list = None):
+
+def create_transactions(scenario_type, scenario_config, txn_count, amounts: list = None, counterparties: list = None, txn_type_override=None):
     """Create test transactions and add them to the selected rule window."""
     ws = WindowState(ws_config)
     scenario_config = scenario_config[scenario_type]
@@ -64,10 +71,13 @@ def create_transactions(scenario_type, scenario_config, txn_count, amounts: list
     elif scenario_type == "smurfing":
         low = scenario_config["min_amount"]
         high = scenario_config["max_amount"]
+    elif scenario_type == "mule_fan_in":
+        low = scenario_config["min_amount"]
+        high = scenario_config["max_amount"]
 
     gap_minutes_min = scenario_config["inter_transaction_gap_minutes"]["min"]
     gap_minutes_max = scenario_config["inter_transaction_gap_minutes"]["max"]
-    txn_type = scenario_config["forced_txn_type"]
+    txn_type = txn_type_override or scenario_config["forced_txn_type"]
 
     base_time = datetime.now(timezone.utc)
 
@@ -76,6 +86,11 @@ def create_transactions(scenario_type, scenario_config, txn_count, amounts: list
     else:
         if len(amounts) != txn_count:
             raise ValueError(f"Invalid amount count: {len(amounts)}")
+
+    if counterparties is None:
+        counterparties = ["acc-2"] * txn_count
+    elif len(counterparties) != txn_count:
+        raise ValueError(f"Invalid counterparty count: {len(counterparties)}")
 
     gap_minutes = test_random.uniform(gap_minutes_min, gap_minutes_max)
     event_times = [base_time + timedelta(minutes=i * gap_minutes) for i in range(txn_count)]
@@ -88,7 +103,7 @@ def create_transactions(scenario_type, scenario_config, txn_count, amounts: list
         transaction = Transaction(
             transaction_id=txn_id,
             account_id="acc-1",
-            counterparty_id="acc-2",
+            counterparty_id=counterparties[i],
             amount=txn_amount,
             currency="TRY",
             txn_type=txn_type,
@@ -349,3 +364,123 @@ def test_smurfing_replayed_transaction_does_not_double_count():
     assert is_smurfing is False
     assert len(smurfing_txns) == unique_txn_count
     assert sum(txn.transaction_id == duplicate_transaction.transaction_id for txn in smurfing_txns) == 1
+
+
+# Mule fan-in
+
+
+def mule_counterparties(count, distinct_count):
+    """Return count counterparties containing exactly distinct_count source accounts."""
+    sources = [f"source-{index}" for index in range(distinct_count)]
+    return [sources[index % distinct_count] for index in range(count)]
+
+
+def test_mule_fan_in_positive_triggers_on_all_thresholds():
+    amounts = [2000] * mule_fan_in_min_count
+    counterparties = mule_counterparties(mule_fan_in_min_count, mule_fan_in_min_distinct_counterparties)
+    window_state, account_id = create_transactions(
+        "mule_fan_in", scenario_types, mule_fan_in_min_count, amounts, counterparties
+    )
+
+    is_mule_fan_in, mule_txns = check_mule_fan_in(window_state, account_id)
+
+    assert is_mule_fan_in is True
+    assert len(mule_txns) == mule_fan_in_min_count
+    assert len({txn.counterparty_id for txn in mule_txns}) == mule_fan_in_min_distinct_counterparties
+    assert sum(txn.amount for txn in mule_txns) == mule_fan_in_min_total_amount
+
+
+def test_mule_fan_in_negative_below_minimum_transaction_count():
+    txn_count = mule_fan_in_min_count - 1
+    window_state, account_id = create_transactions(
+        "mule_fan_in", scenario_types, txn_count, [2500] * txn_count,
+        mule_counterparties(txn_count, mule_fan_in_min_distinct_counterparties),
+    )
+
+    is_mule_fan_in, mule_txns = check_mule_fan_in(window_state, account_id)
+
+    assert is_mule_fan_in is False
+    assert len(mule_txns) == txn_count
+
+
+def test_mule_fan_in_negative_below_distinct_counterparty_threshold():
+    window_state, account_id = create_transactions(
+        "mule_fan_in", scenario_types, mule_fan_in_min_count, [2000] * mule_fan_in_min_count,
+        mule_counterparties(mule_fan_in_min_count, mule_fan_in_min_distinct_counterparties - 1),
+    )
+
+    is_mule_fan_in, _ = check_mule_fan_in(window_state, account_id)
+
+    assert is_mule_fan_in is False
+
+
+def test_mule_fan_in_negative_below_total_amount_threshold():
+    amount_below_total = (mule_fan_in_min_total_amount / mule_fan_in_min_count) - 1
+    window_state, account_id = create_transactions(
+        "mule_fan_in", scenario_types, mule_fan_in_min_count,
+        [amount_below_total] * mule_fan_in_min_count,
+        mule_counterparties(mule_fan_in_min_count, mule_fan_in_min_distinct_counterparties),
+    )
+
+    is_mule_fan_in, mule_txns = check_mule_fan_in(window_state, account_id)
+
+    assert sum(txn.amount for txn in mule_txns) < mule_fan_in_min_total_amount
+    assert is_mule_fan_in is False
+
+
+def test_mule_fan_in_minimum_amount_boundary_is_inclusive():
+    amounts = [mule_fan_in_limit_min] + [2500] * (mule_fan_in_min_count - 1)
+    window_state, account_id = create_transactions(
+        "mule_fan_in", scenario_types, mule_fan_in_min_count, amounts,
+        mule_counterparties(mule_fan_in_min_count, mule_fan_in_min_distinct_counterparties),
+    )
+
+    is_mule_fan_in, mule_txns = check_mule_fan_in(window_state, account_id)
+
+    assert is_mule_fan_in is True
+    assert any(txn.amount == mule_fan_in_limit_min for txn in mule_txns)
+
+
+def test_mule_fan_in_excludes_non_transfer_in_transactions():
+    window_state, account_id = create_transactions(
+        "mule_fan_in", scenario_types, mule_fan_in_min_count, [2000] * mule_fan_in_min_count,
+        mule_counterparties(mule_fan_in_min_count, mule_fan_in_min_distinct_counterparties),
+        txn_type_override="transfer_out",
+    )
+
+    is_mule_fan_in, mule_txns = check_mule_fan_in(window_state, account_id)
+
+    assert is_mule_fan_in is False
+    assert mule_txns == []
+
+
+def test_mule_fan_in_replayed_transaction_does_not_double_count():
+    txn_count = mule_fan_in_min_count - 1
+    window_state, account_id = create_transactions(
+        "mule_fan_in", scenario_types, txn_count, [2500] * txn_count,
+        mule_counterparties(txn_count, mule_fan_in_min_distinct_counterparties),
+    )
+    duplicate_transaction = window_state.windows["mule_fan_in"][account_id][0]
+
+    window_state.add_transaction("mule_fan_in", duplicate_transaction)
+    is_mule_fan_in, mule_txns = check_mule_fan_in(window_state, account_id)
+
+    assert is_mule_fan_in is False
+    assert len(mule_txns) == txn_count
+    assert len(window_state.windows["mule_fan_in"][account_id]) == txn_count
+
+
+def test_mule_fan_in_summary_contains_explainable_metrics():
+    amounts = [2000] * mule_fan_in_min_count
+    counterparties = mule_counterparties(mule_fan_in_min_count, mule_fan_in_min_distinct_counterparties)
+    window_state, account_id = create_transactions(
+        "mule_fan_in", scenario_types, mule_fan_in_min_count, amounts, counterparties
+    )
+    _, mule_txns = check_mule_fan_in(window_state, account_id)
+
+    summary = summarize_mule_fan_in(mule_txns)
+
+    assert summary["qualifying_transaction_count"] == mule_fan_in_min_count
+    assert summary["distinct_counterparty_count"] == mule_fan_in_min_distinct_counterparties
+    assert summary["total_amount"] == str(mule_fan_in_min_total_amount)
+    assert summary["thresholds"]["min_total_amount"] == mule_fan_in_min_total_amount

@@ -4,6 +4,7 @@ import sys
 import os
 import json
 from datetime import datetime
+from decimal import Decimal
 from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts', 'simulator'))
@@ -233,3 +234,37 @@ def test_publish_alert_uses_alerts_topic_and_valid_json():
     assert produce_kwargs["key"] == transaction.account_id.encode("utf-8")
     assert json.loads(produce_kwargs["value"])["alert_id"] == alert.alert_id
     producer.poll.assert_called_once_with(0)
+
+
+def test_mule_fan_in_alert_persists_metrics_before_publish():
+    conn = MagicMock()
+    producer = MagicMock()
+    transaction = build_transaction().model_copy(update={
+        "txn_type": TxnType.TRANSFER_IN,
+        "counterparty_id": "33333333-3333-3333-3333-333333333333",
+        "amount": Decimal("2000.00"),
+    })
+    metrics = {
+        "qualifying_transaction_count": 10,
+        "distinct_counterparty_count": 8,
+        "total_amount": "20000.00",
+    }
+
+    with patch('txn_consumer.execute_values') as mock_execute_values:
+        alert = write_alert(
+            conn,
+            transaction,
+            "R-003",
+            "mule_fan_in",
+            "medium",
+            [transaction],
+            datetime(2026, 1, 1, 12, 0, 2),
+            metrics=metrics,
+        )
+        publish_alert(producer, "alerts", alert)
+
+    assert alert.rule_id == "R-003"
+    assert alert.window_summary["metrics"] == metrics
+    mock_execute_values.assert_called_once()
+    assert producer.produce.call_count == 1
+    assert json.loads(producer.produce.call_args.kwargs["value"])["window_summary"]["metrics"] == metrics
