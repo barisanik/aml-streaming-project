@@ -41,7 +41,7 @@ Tespit mantığı bellek içinde, analitik hesaplamalar ise SQL katmanında çal
 
 ## Veri Kaynağı
 
-Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretilen müşteri profilleri hem işlem simülasyonunu hem de tespit tarafını besler. Şu an structuring ve smurfing senaryoları akışa enjekte edilir; mule fan-in, hesap ele geçirme ve uykuda kalan hesabın aniden aktifleşmesi sonraki kapsamdadır. Enjekte edilen işlemlerin gerçek etiketleri ayrı `answer_key` tablosunda saklanır. Tespit sistemi bu etiketlere hiçbir şekilde erişemez, böylece sistemin başarısı gerçek ve önyargısız bir şekilde ölçülebilir.
+Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretilen müşteri profilleri hem işlem simülasyonunu hem de tespit tarafını besler. Structuring, smurfing ve mule fan-in senaryoları akışa enjekte edilir; hesap ele geçirme ve uykuda kalan hesabın aniden aktifleşmesi sonraki kapsamdadır. Mule fan-in, tek bir hedef hesaba çok sayıda farklı kaynaktan gelen `transfer_in` işlemleri olarak üretilir. Enjekte edilen işlemlerin gerçek etiketleri ayrı `answer_key` tablosunda saklanır. Tespit sistemi bu etiketlere hiçbir şekilde erişemez, böylece sistemin başarısı gerçek ve önyargısız bir şekilde ölçülebilir.
 
 ## Varlık İlişki Diyagramı
 
@@ -105,7 +105,7 @@ python scripts/dbt/dbt_scheduler.py
 - **At-least-once ve idempotency:** Mesajların en az bir kez iletilmesi garanti edilir, aynı mesajın tekrar işlenmesi durumunda veri tekrar yazılmaz.
 - **Ground-truth izolasyonu:** Enjekte edilen senaryoların türü (normal/zararlı işlem) tespit sistemine hiçbir şekilde sızmaz. Veri erişiminde ayrım veritabanı yetkilendirmesiyle sağlanır.
 - **Alert yazım sırası:** Bir alert oluştuğunda önce Postgres'e yazılır ve bu yazımın başarılı olduğu doğrulanır, ardından mesaj kuyruğuna gönderilir. Böylece iki sistem arasında tutarsızlık riski en aza indirilir.
-- **Tespit sistemi kuralları:** Structuring ve smurfing event-time sliding window'larda değerlendirilir.
+- **Tespit sistemi kuralları:** Structuring, smurfing ve mule fan-in event-time sliding window'larda değerlendirilir.
 - **Doğrulama:** Birim testleri broker veya veritabanına bağımlı değildir.
 
 ---
@@ -151,7 +151,7 @@ Detection logic runs in memory, while analytical calculations run in the SQL lay
 
 ## Data Source
 
-All data in the platform is synthetic, no real transaction data is used. The generated customer profiles feed both the transaction simulation and the detection side. Structuring and smurfing scenarios are currently injected into the stream; mule fan-in, account takeover, and dormant-account activation remain planned. True labels for injected transactions are stored in the separate `answer_key` table. The detection system has no access to these labels, so performance can be measured fairly and without bias.
+All data in the platform is synthetic, no real transaction data is used. The generated customer profiles feed both the transaction simulation and the detection side. Structuring, smurfing, and mule fan-in scenarios are currently injected into the stream; account takeover and dormant-account activation remain planned. Mule fan-in is generated as `transfer_in` transactions from many distinct source accounts to one target account. True labels for injected transactions are stored in the separate `answer_key` table. The detection system has no access to these labels, so performance can be measured fairly and without bias.
 
 ## Entity-Relationship Diagram
 
@@ -215,5 +215,5 @@ python scripts/dbt/dbt_scheduler.py
 - **At-least-once and idempotency:** Message delivery is guaranteed at least once, and if a message gets processed again, it does not get written to the database twice.
 - **Ground-truth isolation:** The true labels of injected scenarios (normal/suspicious transaction) never leak into the detection system. Data access authorization is provided by database permissions.
 - **Alert write order:** When an alert is created, it is written to PostgreSQL first and this write is confirmed as successful, only then is it sent to the message queue. This keeps the risk of inconsistency between the two systems as low as possible.
-- **Detection system rules:** Structuring and smurfing run over event-time sliding windows.
+- **Detection system rules:** Structuring, smurfing, and mule fan-in run over event-time sliding windows.
 - **Verification:** Unit tests do not require a broker or database.
