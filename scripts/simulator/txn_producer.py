@@ -27,7 +27,7 @@ import random
 from faker import Faker
 import uuid
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import time
 
 import numpy as np
@@ -269,7 +269,7 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
     topic = config["topics"]["transactions_topic"]
     account_id = customer_profile['account_id']
     event_time = current_sim_time
-    produced_at = datetime.now()
+    produced_at = datetime.now(timezone.utc)
     merchant_category = random.choice(customer_profile["preferred_merchant_categories"])
     city = customer_profile["home_city"]
     country = customer_profile["home_country"]
@@ -305,7 +305,7 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
                     transaction_id=transaction_id, 
                     scenario_id=scenario_details["scenario_id"], 
                     scenario_type=scenario_details["scenario_type"], 
-                    injected_at=str(datetime.now())
+                    injected_at=datetime.now(timezone.utc)
                 )
                 cur.close()
                 break       # Break the loop if write successfull.

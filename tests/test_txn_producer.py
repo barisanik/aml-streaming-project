@@ -4,7 +4,7 @@ import sys
 import os
 import random
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
 import json
 
@@ -282,6 +282,7 @@ def test_create_transaction_event_returns_valid_payload_when_not_poisoned():
         assert result is not None
         assert result["account_id"] == TEST_PROFILE["account_id"]
         assert result["amount"] > 0
+        assert result["produced_at"].utcoffset().total_seconds() == 0
         mock_producer.produce.assert_called_once()
 
 def test_create_transaction_event_poisoned_forces_scenario_txn_type_and_amount():
@@ -315,6 +316,9 @@ def test_create_transaction_event_poisoned_forces_scenario_txn_type_and_amount()
         mock_producer.produce.assert_called_once()
 
         sent_payload = json.loads(mock_producer.produce.call_args.kwargs["value"])
+        assert datetime.fromisoformat(sent_payload["produced_at"]).utcoffset().total_seconds() == 0
+        injected_at = conn.cursor.return_value.execute.call_args.args[1][3]
+        assert injected_at.utcoffset().total_seconds() == 0
         assert sent_payload["txn_type"] == "cash_deposit"
         assert 8500 <= float(sent_payload["amount"]) <= 9900
 

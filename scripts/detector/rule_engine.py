@@ -79,16 +79,16 @@ def check_structuring(window_state, account_id):
     )
 
 def check_smurfing(window_state, account_id):
-    """Checks if an account's smurfing window triggers the rule."""
+    """Check small outgoing transfers in an account's smurfing window."""
 
     account_txn_list = window_state.windows["smurfing"][account_id]
     filtered_transactions = []
-    total_amount = 0
-
     for transaction in account_txn_list:
-        if smurfing_limit_min <= transaction.amount <= smurfing_limit_max:
+        if (
+            transaction.txn_type.value == scenario_types["smurfing"]["forced_txn_type"]
+            and smurfing_limit_min <= transaction.amount <= smurfing_limit_max
+        ):
             filtered_transactions.append(transaction)
-            total_amount += transaction.amount
 
     is_triggered = len(filtered_transactions) >= smurfing_min_count
 

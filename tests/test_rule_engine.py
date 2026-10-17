@@ -18,7 +18,7 @@ WS_CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "window_co
 sys.path.insert(0, str(SHARED_DIR))
 sys.path.insert(0, str(DETECTOR_DIR))
 
-from schemas import Transaction
+from schemas import Transaction, TxnType
 from window_state import WindowState
 import rule_engine
 from rule_engine import check_mule_fan_in, check_smurfing, check_structuring, summarize_mule_fan_in
@@ -300,6 +300,52 @@ def test_smurfing_negative_below_min_count():
 
     assert is_smurfing is False
     assert len(smurfing_txns) == txn_count
+
+
+def test_smurfing_ignores_other_transaction_types():
+    amounts = [500] * smurfing_min_count
+    window_state, account_id = create_transactions(
+        "smurfing", scenario_types, smurfing_min_count, amounts,
+        txn_type_override="card_payment",
+    )
+
+    is_smurfing, smurfing_txns = check_smurfing(window_state, account_id)
+
+    assert is_smurfing is False
+    assert smurfing_txns == []
+
+
+def test_smurfing_mixed_types_only_counts_outgoing_transfers():
+    amounts = [500] * (smurfing_min_count - 1)
+    window_state, account_id = create_transactions(
+        "smurfing", scenario_types, len(amounts), amounts,
+    )
+    last_transaction = window_state.windows["smurfing"][account_id][-1]
+    card_payment = last_transaction.model_copy(update={
+        "transaction_id": "card-payment",
+        "txn_type": TxnType.CARD_PAYMENT,
+        "event_time": last_transaction.event_time + timedelta(minutes=1),
+    })
+    window_state.add_transaction("smurfing", card_payment)
+
+    is_smurfing, smurfing_txns = check_smurfing(window_state, account_id)
+
+    assert is_smurfing is False
+    assert len(smurfing_txns) == smurfing_min_count - 1
+    assert card_payment not in smurfing_txns
+
+    outgoing_transfer = card_payment.model_copy(update={
+        "transaction_id": "final-transfer",
+        "txn_type": last_transaction.txn_type,
+        "event_time": card_payment.event_time + timedelta(minutes=1),
+    })
+    window_state.add_transaction("smurfing", outgoing_transfer)
+
+    is_smurfing, smurfing_txns = check_smurfing(window_state, account_id)
+
+    assert is_smurfing is True
+    assert len(smurfing_txns) == smurfing_min_count
+    assert card_payment not in smurfing_txns
 
 
 def test_smurfing_min_amount_boundary_inclusive():

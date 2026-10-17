@@ -23,7 +23,7 @@ from pathlib import Path
 import json
 import yaml
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import ValidationError
 import logging
@@ -197,7 +197,7 @@ def write_heartbeat(conn, consumer, consumer_group, topic, messages_processed_by
             tp.partition,
             tp.offset,
             messages_processed_by_partition.get(tp.partition, 0),
-            datetime.now(),
+            datetime.now(timezone.utc),
         )
         for tp in partitions
     ]
@@ -359,7 +359,7 @@ def main() -> None:
             window_state.add_transaction("smurfing", transaction)
             window_state.add_transaction("mule_fan_in", transaction)
 
-            alert_time = datetime.now()
+            alert_time = datetime.now(timezone.utc)
 
             # Check if recent activites are suspicious or not.
             is_structuring, structuring_txns = check_structuring(window_state, transaction.account_id)

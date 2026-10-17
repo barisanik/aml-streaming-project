@@ -3,7 +3,7 @@
 import sys
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
 
@@ -40,7 +40,7 @@ def build_transaction(transaction_id="11111111-1111-1111-1111-111111111111"):
         city="Istanbul",
         country="TR",
         event_time=datetime(2026, 1, 1, 12, 0, 0),
-        produced_at=datetime(2026, 1, 1, 12, 0, 1),
+        produced_at=datetime(2026, 1, 1, 12, 0, 1, tzinfo=timezone.utc),
         device_id=None,
     )
 
@@ -155,6 +155,7 @@ def test_write_heartbeat_writes_one_row_per_partition():
         write_heartbeat(conn, consumer, "test_group", "transactions", {0: 50, 1: 75})
         _, _, rows = mock_execute_values.call_args[0]
         assert len(rows) == 2
+        assert all(row[5].utcoffset().total_seconds() == 0 for row in rows)
 
 def test_write_heartbeat_uses_zero_for_partition_with_no_processed_messages():
     conn = MagicMock()
@@ -195,7 +196,7 @@ def test_write_heartbeat_sql_contains_upsert_on_conflict():
 def test_write_alert_returns_the_stored_alert():
     conn = MagicMock()
     transaction = build_transaction()
-    alert_time = datetime(2026, 1, 1, 12, 0, 2)
+    alert_time = datetime(2026, 1, 1, 12, 0, 2, tzinfo=timezone.utc)
 
     with patch('txn_consumer.execute_values') as mock_execute_values:
         alert = write_alert(
@@ -209,8 +210,25 @@ def test_write_alert_returns_the_stored_alert():
         )
 
     assert alert.transaction_id == transaction.transaction_id
+    assert alert.detection_latency_ms == 1000
+    assert alert.alert_time.utcoffset().total_seconds() == 0
     assert alert.window_summary["transactions"][0]["transaction_id"] == transaction.transaction_id
     mock_execute_values.assert_called_once()
+
+
+def test_write_alert_latency_handles_aware_timezones():
+    transaction = build_transaction().model_copy(update={
+        "produced_at": datetime(2026, 1, 1, 15, 0, 1, tzinfo=timezone(timedelta(hours=3))),
+    })
+    alert_time = datetime(2026, 1, 1, 12, 0, 2, tzinfo=timezone.utc)
+
+    with patch('txn_consumer.execute_values'):
+        alert = write_alert(
+            MagicMock(), transaction, "R-002", "smurfing", "medium",
+            [transaction], alert_time,
+        )
+
+    assert alert.detection_latency_ms == 1000
 
 def test_publish_alert_uses_alerts_topic_and_valid_json():
     conn = MagicMock()
@@ -224,7 +242,7 @@ def test_publish_alert_uses_alerts_topic_and_valid_json():
             "smurfing",
             "medium",
             [transaction],
-            datetime(2026, 1, 1, 12, 0, 2),
+            datetime(2026, 1, 1, 12, 0, 2, tzinfo=timezone.utc),
         )
 
     publish_alert(producer, "alerts", alert)
@@ -258,7 +276,7 @@ def test_mule_fan_in_alert_persists_metrics_before_publish():
             "mule_fan_in",
             "medium",
             [transaction],
-            datetime(2026, 1, 1, 12, 0, 2),
+            datetime(2026, 1, 1, 12, 0, 2, tzinfo=timezone.utc),
             metrics=metrics,
         )
         publish_alert(producer, "alerts", alert)
