@@ -37,6 +37,8 @@ Platform altı ana bileşenden oluşur:
 
 Tespit mantığı bellek içinde, analitik hesaplamalar ise SQL katmanında çalışır. Bu ayrım, hızlı tespit ile derinlemesine analizi birbirinden bağımsız tutar.
 
+<img width="1920" height="1080" alt="Mimari" src="https://github.com/user-attachments/assets/a5933441-421e-4b9f-a438-eac1547c79f8" />
+
 ## Veri Kaynağı
 
 Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretilen müşteri profilleri hem işlem simülasyonunu hem de tespit tarafını besler. Şu an structuring ve smurfing senaryoları akışa enjekte edilir; mule fan-in, hesap ele geçirme ve uykuda kalan hesabın aniden aktifleşmesi sonraki kapsamdadır. Enjekte edilen işlemlerin gerçek etiketleri ayrı `answer_key` tablosunda saklanır. Tespit sistemi bu etiketlere hiçbir şekilde erişemez, böylece sistemin başarısı gerçek ve önyargısız bir şekilde ölçülebilir.
