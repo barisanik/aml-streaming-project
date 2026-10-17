@@ -4,7 +4,7 @@ aml_platform:
     dev:
       type: postgres
       host: localhost
-      port: 5432
+      port: 5433
       user: app_dbt
       password: "{{ env_var('APP_DBT_DB_PASSWORD') }}"
       dbname: aml_platform

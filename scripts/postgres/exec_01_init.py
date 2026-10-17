@@ -41,7 +41,7 @@ try:
 
     conn = psycopg2.connect(
         host="localhost",
-        port=5432,
+        port=5433,
         user=os.environ["POSTGRES_USER"],
         password=os.environ["POSTGRES_PASSWORD"],
         dbname="aml_platform",
