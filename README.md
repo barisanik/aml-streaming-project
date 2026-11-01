@@ -16,7 +16,7 @@ Sistem işlemleri saniyeler içinde değerlendirir, şüpheli davranış kalıpl
 | Şema ve validasyon | `pydantic` | Tamamlandı |
 | Simülasyon | Python (`faker` ve `numpy`) | Tamamlandı |
 | Veri depolama | PostgreSQL | Tamamlandı |
-| Dönüşüm | dbt-postgres, incremental staging modeli | Tamamlandı |
+| Dönüşüm | dbt-postgres, incremental staging modelleri ve precision/recall modeli | Tamamlandı |
 | Durum yönetimi | Bellek içi sliding window ve Redis | Sliding window iki kural için tamamlandı, Redis planlandı |
 | İzleme | Grafana | Planlandı |
 | Bildirim | Slack/Discord webhook ve SMTP | Webhook tamamlandı, SMTP planlandı |
@@ -31,8 +31,8 @@ Platform altı ana bileşenden oluşur:
 1. **Profil üretici**, binlerce müşteri profili oluşturur. Her profil lokasyon, gelir segmenti, ortalama işlem tutarı ve aktif saat aralığı gibi bilgiler taşır.
 2. **İşlem üretici (producer)**, bu profilleri kullanarak Poisson süreciyle işlem akışı üretir ve Redpanda'daki `transactions` topic'ine yazar. Belirli bir olasılıkla gerçekçi fraud ve AML senaryoları da bu akışa karıştırılır.
 3. **Kural motoru (consumer)**, işlemleri tüketir, pydantic ile doğrular ve hesap bazlı zaman pencereleri üzerinde kuralları değerlendirir. Doğrulanan işlemler Postgres'e yazılır. Bir kural tetiklenirse alert önce Postgres'e, sonra Redpanda'daki `alerts` topic'ine yazılır.
-4. **Bildirim servisi (notifier)**, `alerts` topic'ini manuel offset commit ile dinler; Slack veya Discord webhook'una yapılandırılabilir retry ile bildirim gönderir. Webhook hata yanıtının gövdesi loglanır. SMTP ayarı vardır, gönderim henüz uygulanmamıştır.
-5. **dbt**, ham işlemleri incremental staging modeline dönüştürür.  
+4. **Bildirim servisi (notifier)**, `alerts` topic'ini manuel offset commit ile dinler. Slack veya Discord webhook'una yapılandırılabilir retry ile bildirim gönderir. Webhook hata yanıtının gövdesi loglanır. SMTP ayarı vardır, gönderim henüz uygulanmamıştır.
+5. **dbt**, ham işlemleri, alert'leri ve answer key'i incremental staging modellerine dönüştürür. Değerlendirme modelleri alert'leri enjekte edilen senaryolarla eşleyip senaryo tipi bazında precision, recall ve detection latency hesaplar.
 6. **Grafana**, PostgreSQL'den operasyonel metrikleri görselleştirmek üzere planlanmıştır.
 
 Tespit mantığı bellek içinde, analitik hesaplamalar ise SQL katmanında çalışır. Bu ayrım, hızlı tespit ile derinlemesine analizi birbirinden bağımsız tutar.
@@ -41,7 +41,7 @@ Tespit mantığı bellek içinde, analitik hesaplamalar ise SQL katmanında çal
 
 ## Veri Kaynağı
 
-Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretilen müşteri profilleri hem işlem simülasyonunu hem de tespit tarafını besler. Structuring, smurfing ve mule fan-in senaryoları akışa enjekte edilir; hesap ele geçirme ve uykuda kalan hesabın aniden aktifleşmesi sonraki kapsamdadır. Mule fan-in, tek bir hedef hesaba çok sayıda farklı kaynaktan gelen `transfer_in` işlemleri olarak üretilir. Enjekte edilen işlemlerin gerçek etiketleri ayrı `answer_key` tablosunda saklanır. Tespit sistemi bu etiketlere hiçbir şekilde erişemez, böylece sistemin başarısı gerçek ve önyargısız bir şekilde ölçülebilir.
+Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretilen müşteri profilleri hem işlem simülasyonunu hem de tespit tarafını besler. Structuring, smurfing ve mule fan-in senaryoları akışa enjekte edilir. Hesap ele geçirme ve uykuda kalan hesabın aniden aktifleşmesi sonraki kapsamdadır. Mule fan-in, tek bir hedef hesaba çok sayıda farklı kaynaktan gelen `transfer_in` işlemleri olarak üretilir. Enjekte edilen işlemlerin gerçek etiketleri ayrı `answer_key` tablosunda saklanır. Tespit sistemi bu etiketlere hiçbir şekilde erişemez, böylece sistemin başarısı gerçek ve önyargısız bir şekilde ölçülebilir.
 
 ## Varlık İlişki Diyagramı
 
@@ -96,9 +96,23 @@ python scripts/simulator/txn_consumer.py
 # 14. Alert notifier'ı başlat
 python scripts/simulator/notifier.py
 
-# 15. dbt scheduler'ı başlat (60 saniyede bir dbt run + test tetikler)
+# 15. dbt scheduler'ı başlat (başlangıçta dbt seed, sonra 60 saniyede bir dbt run + test tetikler)
 python scripts/dbt/dbt_scheduler.py
 ```
+
+### Veriyi sıfırlama
+
+Yeni bir simülasyona boş tablolarla başlamak için önce producer, consumer, notifier ve dbt scheduler'ı durdur, sonra çalıştır:
+
+```bash
+# raw, public.answer_key ve ops tablolarını boşaltır, analytics içindeki dbt tablolarını siler
+python scripts/postgres/reset_data.py
+
+# Redpanda topic'lerini ve consumer group'larını da sıfırlar
+python scripts/postgres/reset_data.py --kafka
+```
+
+Tablolar, roller ve yetkiler korunur, DDL'i tekrar çalıştırmak gerekmez. dbt modelleri bir sonraki koşuda yeniden oluşur.
 
 ## Proje Kararları
 
@@ -128,7 +142,7 @@ The system evaluates transactions within seconds, catches suspicious behavior pa
 | Schema and validation | `pydantic` | Done |
 | Simulation | Python (`faker` and `numpy`) | Done |
 | Data storage | PostgreSQL | Done |
-| Transformation | dbt-postgres, incremental staging model | Done |
+| Transformation | dbt-postgres, incremental staging models and precision/recall model | Done |
 | State management | In-memory sliding window and Redis | Sliding window is done for two rule, Redis planned |
 | Monitoring | Grafana (using PostgreSQL data source) | Planned |
 | Notification | Slack/Discord webhook and SMTP | Webhook done, SMTP planned |
@@ -144,14 +158,14 @@ The platform is built from six main components:
 2. The **transaction producer** uses these profiles to generate a transaction stream through a Poisson process and writes it to the `transactions` topic in Redpanda. With a small probability, realistic fraud and AML scenarios are mixed into the stream as well.
 3. The **rule engine (consumer)** consumes transactions, validates them with pydantic, and evaluates rules over per-account sliding time windows. Validated transactions are written to Postgres. When a rule fires, the alert is written to PostgreSQL first and then to the `alerts` topic in Redpanda.
 4. The **notifier** consumes the `alerts` topic with manual offset commits and sends Slack or Discord webhook notifications with configurable retries. It logs HTTP error response bodies. SMTP is configured but not implemented.
-5. **dbt** transforms raw transactions into an incremental staging model.
+5. **dbt** transforms raw transactions, alerts and the answer key into incremental staging models. Evaluation models match alerts to injected scenarios and calculate precision, recall and detection latency per scenario type.
 6. **Grafana** is planned to visualize operational metrics from PostgreSQL.
 
 Detection logic runs in memory, while analytical calculations run in the SQL layer. This separation keeps fast detection and deeper analysis independent from each other.
 
 ## Data Source
 
-All data in the platform is synthetic, no real transaction data is used. The generated customer profiles feed both the transaction simulation and the detection side. Structuring, smurfing, and mule fan-in scenarios are currently injected into the stream; account takeover and dormant-account activation remain planned. Mule fan-in is generated as `transfer_in` transactions from many distinct source accounts to one target account. True labels for injected transactions are stored in the separate `answer_key` table. The detection system has no access to these labels, so performance can be measured fairly and without bias.
+All data in the platform is synthetic, no real transaction data is used. The generated customer profiles feed both the transaction simulation and the detection side. Structuring, smurfing, and mule fan-in scenarios are currently injected into the stream. Account takeover and dormant-account activation remain planned. Mule fan-in is generated as `transfer_in` transactions from many distinct source accounts to one target account. True labels for injected transactions are stored in the separate `answer_key` table. The detection system has no access to these labels, so performance can be measured fairly and without bias.
 
 ## Entity-Relationship Diagram
 
@@ -206,9 +220,23 @@ python scripts/simulator/txn_consumer.py
 # 14. Start the alert notifier
 python scripts/simulator/notifier.py
 
-# 15. Start the dbt scheduler (triggers dbt run + test every 60 seconds.)
+# 15. Start the dbt scheduler (runs dbt seed once, then triggers dbt run + test every 60 seconds.)
 python scripts/dbt/dbt_scheduler.py
 ```
+
+### Resetting data
+
+To start a new simulation with empty tables, stop the producer, consumer, notifier and dbt scheduler first, then run:
+
+```bash
+# empties raw, public.answer_key and ops tables, drops dbt tables in analytics
+python scripts/postgres/reset_data.py
+
+# also resets Redpanda topics and consumer groups
+python scripts/postgres/reset_data.py --kafka
+```
+
+Tables, roles and grants are kept, so the DDL does not need to run again. dbt rebuilds its models on the next run.
 
 ## Project Decisions
 
