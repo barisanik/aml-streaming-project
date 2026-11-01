@@ -17,6 +17,7 @@ import time
 import logging
 from pathlib import Path
 import yaml
+from dotenv import load_dotenv
 
 ### Initial parameters ###
 
@@ -27,6 +28,13 @@ LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 DBT_PROJECT_DIR = PROJECT_ROOT / "dbt" / "aml_platform"
 CONFIG_DIR = PROJECT_ROOT / "configs" / "dbt_scheduler_config.yml"
+
+# The project profile is used explicitly, otherwise dbt falls back to ~/.dbt/profiles.yml
+# when the scheduler is started outside the dbt project folder.
+DBT_ARGS = ["--project-dir", str(DBT_PROJECT_DIR), "--profiles-dir", str(DBT_PROJECT_DIR)]
+
+# profiles.yml reads APP_DBT_DB_PASSWORD from the environment.
+load_dotenv(PROJECT_ROOT / ".env")
 
 # Logging parameters
 logging.basicConfig(
@@ -50,8 +58,8 @@ def run_dbt_with_retry() -> bool:
     """Runs dbt models, retrying up to MAX_RETRIES times on failure."""
     for attempt in range(1, MAX_RETRIES + 1):
         runner = dbtRunner()
-        run_result = runner.invoke(["run", "--project-dir", str(DBT_PROJECT_DIR)])
-        test_result = runner.invoke(["test", "--project-dir", str(DBT_PROJECT_DIR)])
+        run_result = runner.invoke(["run", *DBT_ARGS])
+        test_result = runner.invoke(["test", *DBT_ARGS])
 
         setup_logging()  # dbt just reset the root logger, restore logging settings
 
@@ -87,8 +95,16 @@ if __name__ == "__main__":
     MAX_RETRIES = config["loop"]["max_retries"]
 
     # Adjust logging settings
-    setup_logging() 
+    setup_logging()
     logging.info("dbt scheduler started.")
+
+    # Seeds change only with the code, loading them once at startup is enough.
+    seed_result = dbtRunner().invoke(["seed", *DBT_ARGS])
+    setup_logging()
+    if seed_result.success:
+        logging.info("dbt seed succeeded.")
+    else:
+        logging.error("dbt seed failed, models that depend on seeds will fail until it succeeds.")
 
     try:
         while True:
