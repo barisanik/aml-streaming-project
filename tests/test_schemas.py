@@ -225,7 +225,7 @@ def test_profile_accepts_valid_data():
 def test_profile_segment_defaults_to_individual():
     """segment is not passed here -- must default without raising, since
     profile_gen.py only sets it explicitly for forward-compatibility, not
-    because Phase 0-2 requires per-profile variation."""
+    because the current rules require per-profile variation."""
     profile = Profile(**VALID_PROFILE)
     assert profile.segment == EntitySegment.INDIVIDUAL
 

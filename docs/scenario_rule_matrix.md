@@ -1,9 +1,11 @@
 # Scenario ↔ Rule Interaction Matrix
 
-| scenario_type | expected rule(s) | status |
+Thresholds and rule metadata live in `configs/scenario_config.yml` and window lengths in `configs/window_config.yml`.
+
+| scenario_type | expected rule | status |
 |---|---|---|
-| structuring | structuring rule | pending |
-| smurfing | smurfing rule | pending |
-| mule_fan_in | mule fan-in | implemented. working on tests |
-| account_takeover | profile deviation | pending |
-| dormant_activation | profile deviation | pending |
+| structuring | R-001 Structuring | Implemented |
+| smurfing | R-002 Smurfing (`transfer_out` only) | Implemented |
+| mule_fan_in | R-003 Mule fan-in | Implemented |
+| account_takeover | Profile deviation | Not implemented |
+| dormant_activation | Profile deviation | Not implemented |

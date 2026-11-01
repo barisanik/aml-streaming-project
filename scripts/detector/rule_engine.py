@@ -12,8 +12,6 @@
 #    - Called by txn_consumer.py, not useable directly.
 """
 
-import sys
-import os
 import yaml
 from pathlib import Path
 
@@ -25,14 +23,9 @@ def load_config(path: Path) -> dict:
 ## PATHS
 # Project Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-LOG_DIR = PROJECT_ROOT / "logs"
-LOG_DIR.mkdir(parents=True, exist_ok=True)      # create logs folder if it does not exist yet
 
 # Config Paths
-CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "producer_config.yml"
-SCN_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "configs" / "scenario_config.yml"
-PROFILES_PATH = Path(__file__).resolve().parent.parent / "simulator" / "profiles.json"
-SHARED_DIR = PROJECT_ROOT / "shared"
+SCN_CONFIG_PATH = PROJECT_ROOT / "configs" / "scenario_config.yml"
 
 scenario = load_config(SCN_CONFIG_PATH)
 scenario_types = scenario["scenario_types"]

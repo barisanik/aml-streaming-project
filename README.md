@@ -51,7 +51,7 @@ Platformdaki tüm veri sentetiktir, gerçek işlem verisi kullanılmaz. Üretile
 
 ```bash
 # 1. Environment dosyasının içeriğini düzenle
-# '.env-Sample' dosyasının adını '.env' olarak değiştir.
+# '.env.sample' dosyasını '.env' olarak kopyala.
 # [POSTGRES_USERNAME] gibi köşeli parantezle belirtilen kullanıcı adlarını ve şifreleri belirle.
 
 # 2. Python sanal ortamını kur
@@ -161,7 +161,7 @@ All data in the platform is synthetic, no real transaction data is used. The gen
 
 ```bash
 # 1. Modify environment file
-# Rename '.env-Sample' file as '.env'.
+# Copy '.env.sample' to '.env'.
 # Replace placeholders marked by square brackets such as [POSTGRES_USERNAME] with actual password and username.
 
 # 2. Set up the Python environment

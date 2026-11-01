@@ -9,5 +9,5 @@
 | Postgres | APP_NOTIFIER_DB_PASSWORD | text | Password for the `app_notifier` role |
 | Postgres | APP_DBT_DB_PASSWORD | text | Password for the `app_dbt` role |
 | Postgres | APP_GRAFANA_DB_PASSWORD | text | Password for the `app_grafana` role |
-| Slack/Discord | WEBHOOK_URL | absolute URL | |
-| SMTP | SMTP_HOST / SMTP_USER / SMTP_PASS | text | |
+| Slack/Discord | NOTIFIER_WEBHOOK_URL | absolute URL | Read by notifier.py |
+| SMTP | SMTP_HOST / SMTP_USER / SMTP_PASS | text | Planned, not read by code yet |

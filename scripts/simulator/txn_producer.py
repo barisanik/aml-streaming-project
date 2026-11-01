@@ -82,6 +82,7 @@ def load_profiles(path: Path) -> dict:
 ## CONFIGS
 config = load_config(CONFIG_PATH)
 scenario = load_config(SCN_CONFIG_PATH)
+max_active_scenarios = scenario["max_active_scenarios"]
 profiles = load_profiles(PROFILES_PATH)
 
 ## SEED
@@ -438,11 +439,11 @@ def main(current_sim_time,producer) -> None:
             else:
                 trx_user = random.choice(profiles)
 
-                # Allows maximum 5 active scenario at the same time.
-                if len(active_scenarios) == 5:
+                # Allows maximum max_active_scenarios active scenario at the same time.
+                if len(active_scenarios) >= max_active_scenarios:
                     trigger_possibility_true = scenario["trigger_possibility"]["capacity_full"]["true_possibility"]
                     trigger_possibility_false = scenario["trigger_possibility"]["capacity_full"]["false_possibility"]
-                elif len(active_scenarios) < 5:
+                else:
                     trigger_possibility_true = scenario["trigger_possibility"]["capacity_available"]["true_possibility"]
                     trigger_possibility_false = scenario["trigger_possibility"]["capacity_available"]["false_possibility"]
 

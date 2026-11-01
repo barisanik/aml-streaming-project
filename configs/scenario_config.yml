@@ -64,6 +64,8 @@ scenario_types:
     min_distinct_counterparties: 8 # minimum number of accounts to get transactions
     min_total_amount: 20000
 
+max_active_scenarios: 5            # maximum number of scenario series running at the same time
+
 trigger_possibility:
   capacity_available:
     true_possibility: 0.01
