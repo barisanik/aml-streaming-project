@@ -50,6 +50,10 @@ CREATE TABLE raw.transactions (
 CREATE INDEX IF NOT EXISTS idx_raw_transactions_account_event
     ON raw.transactions (account_id, event_time);
 
+-- Grafana panels and the no-data alert filter on recent inserts
+CREATE INDEX IF NOT EXISTS idx_raw_transactions_inserted_at
+    ON raw.transactions (inserted_at);
+
 -- Alerts
 DROP TABLE IF EXISTS raw.alerts;
 CREATE TABLE raw.alerts (
@@ -92,6 +96,7 @@ CREATE TABLE ops.consumer_heartbeat (
     topic               TEXT NOT NULL,
     partition           INTEGER NOT NULL,
     committed_offset    BIGINT NOT NULL,
+    log_end_offset      BIGINT,             -- partition high watermark, lag = log_end_offset - committed_offset
     messages_processed  BIGINT NOT NULL,
     heartbeat_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (consumer_group, topic, partition)
@@ -151,5 +156,7 @@ GRANT SELECT ON raw.transactions, raw.alerts, public.answer_key, ops.consumer_he
 GRANT SELECT ON raw.transactions, raw.alerts, ops.consumer_heartbeat TO app_grafana;
 -- Grafana panels never expose answer_key
 REVOKE ALL ON public.answer_key FROM app_grafana;
+-- Schema usage only. dbt grants SELECT on the aggregated detection mart, other analytics tables stay hidden.
+GRANT USAGE ON SCHEMA analytics TO app_grafana;
 -- analytics schema permission for app_dbt user.
 GRANT USAGE, CREATE ON SCHEMA analytics TO app_dbt;
