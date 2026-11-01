@@ -85,6 +85,7 @@ config = load_config(CONFIG_PATH)
 dlq_topic = config["topics"]["dlq_topic"]
 alerts_topic = config["topics"]["alerts_topic"]
 heartbeat_interval_seconds = config["heartbeat"]["interval_seconds"]
+offset_lookup_timeout_seconds = config["heartbeat"]["offset_lookup_timeout_seconds"]
 
 # Window Config
 window_config = load_config(WINDOW_CONFIG_PATH)
@@ -200,13 +201,24 @@ def flush_buffer(conn, buffer):
     finally:
         cur.close()
 
+def get_log_end_offset(consumer, tp):
+    """Returns the partition's high watermark (offset of the next message to be produced), or None if it is not known yet."""
+    try:
+        # Cached value comes from the last fetch response, so the lookup does not block the consume loop.
+        _, high = consumer.get_watermark_offsets(tp, cached=True)
+    except Exception as e:
+        logging.warning(f"Watermark lookup failed | partition={tp.partition} | error={e}")
+        return None
+    return high if high >= 0 else None
+
 def write_heartbeat(conn, consumer, consumer_group, topic, messages_processed_by_partition):
-    """Writes current consumer progress per partition to ops.consumer_heartbeat."""
+    """Writes committed offset and partition end offset per partition to ops.consumer_heartbeat. Lag is log_end_offset - committed_offset."""
     partitions = consumer.assignment()
     if not partitions:
         return  # No partitions assigned yet, nothing to report
 
-    consumer.position(partitions)  # Fills in the .offset field of each partition
+    # Returns new TopicPartition objects. A negative offset means the group has not committed on that partition yet.
+    partitions = consumer.committed(partitions, timeout=offset_lookup_timeout_seconds)
 
     rows = [
         (
@@ -214,6 +226,7 @@ def write_heartbeat(conn, consumer, consumer_group, topic, messages_processed_by
             topic,
             tp.partition,
             tp.offset,
+            get_log_end_offset(consumer, tp),
             messages_processed_by_partition.get(tp.partition, 0),
             datetime.now(timezone.utc),
         )
@@ -222,17 +235,19 @@ def write_heartbeat(conn, consumer, consumer_group, topic, messages_processed_by
 
     sql = """
         INSERT INTO ops.consumer_heartbeat (
-            consumer_group, 
-            topic, 
-            partition, 
+            consumer_group,
+            topic,
+            partition,
             committed_offset,
-            messages_processed, 
+            log_end_offset,
+            messages_processed,
             heartbeat_at
         )
         VALUES %s
         ON CONFLICT (consumer_group, topic, partition)
         DO UPDATE SET
             committed_offset = EXCLUDED.committed_offset,
+            log_end_offset = EXCLUDED.log_end_offset,
             messages_processed = EXCLUDED.messages_processed,
             heartbeat_at = EXCLUDED.heartbeat_at
     """
@@ -432,6 +447,11 @@ def run(consumer, dlq_producer, alert_producer, conn, window_state, consumer_gro
                 logging.info(f"Final flush: {len(buffer)} records written before shutdown")
             except Exception as e:
                 logging.critical(f"Final flush failed | error={e}")
+
+        try:
+            write_heartbeat(conn, consumer, consumer_group, transactions_topic, messages_processed_by_partition)    # Leave the final committed offsets in the heartbeat table.
+        except Exception as e:
+            logging.error(f"Final heartbeat write failed | error={e}")
 
 def main() -> None:
 

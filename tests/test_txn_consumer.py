@@ -134,10 +134,17 @@ def test_flush_buffer_closes_cursor_even_if_execute_values_raises():
 
 # ── Function: write_heartbeat ────────────────────────────────────────────────
 
+def build_heartbeat_consumer(partitions, high_watermark=1000):
+    """Mock consumer whose committed() returns the given partitions and whose watermark lookup returns (0, high_watermark)."""
+    consumer = MagicMock()
+    consumer.assignment.return_value = partitions
+    consumer.committed.return_value = partitions
+    consumer.get_watermark_offsets.return_value = (0, high_watermark)
+    return consumer
+
 def test_write_heartbeat_skips_when_no_partitions_assigned():
     conn = MagicMock()
-    consumer = MagicMock()
-    consumer.assignment.return_value = []
+    consumer = build_heartbeat_consumer([])
 
     with patch('txn_consumer.execute_values') as mock_execute_values:
         write_heartbeat(conn, consumer, "test_group", "transactions", {})
@@ -145,50 +152,84 @@ def test_write_heartbeat_skips_when_no_partitions_assigned():
 
 def test_write_heartbeat_writes_one_row_per_partition():
     conn = MagicMock()
-    consumer = MagicMock()
-    consumer.assignment.return_value = [
+    consumer = build_heartbeat_consumer([
         FakeTopicPartition(partition=0, offset=100),
         FakeTopicPartition(partition=1, offset=200),
-    ]
+    ])
 
     with patch('txn_consumer.execute_values') as mock_execute_values:
         write_heartbeat(conn, consumer, "test_group", "transactions", {0: 50, 1: 75})
         _, _, rows = mock_execute_values.call_args[0]
         assert len(rows) == 2
-        assert all(row[5].utcoffset().total_seconds() == 0 for row in rows)
+        assert all(row[6].utcoffset().total_seconds() == 0 for row in rows)
 
 def test_write_heartbeat_uses_zero_for_partition_with_no_processed_messages():
     conn = MagicMock()
-    consumer = MagicMock()
-    consumer.assignment.return_value = [FakeTopicPartition(partition=2, offset=10)]
+    consumer = build_heartbeat_consumer([FakeTopicPartition(partition=2, offset=10)])
 
     with patch('txn_consumer.execute_values') as mock_execute_values:
         write_heartbeat(conn, consumer, "test_group", "transactions", {})
         _, _, rows = mock_execute_values.call_args[0]
-        assert rows[0][4] == 0  # messages_processed column
+        assert rows[0][5] == 0  # messages_processed column
 
-def test_write_heartbeat_row_uses_correct_offset_per_partition():
+def test_write_heartbeat_row_uses_offset_returned_by_committed():
     conn = MagicMock()
-    consumer = MagicMock()
-    consumer.assignment.return_value = [
-        FakeTopicPartition(partition=0, offset=555),
-    ]
+    consumer = build_heartbeat_consumer([FakeTopicPartition(partition=0, offset=-1000)])
+    consumer.committed.return_value = [FakeTopicPartition(partition=0, offset=555)]
 
     with patch('txn_consumer.execute_values') as mock_execute_values:
         write_heartbeat(conn, consumer, "test_group", "transactions", {0: 10})
         _, _, rows = mock_execute_values.call_args[0]
-        assert rows[0][3] == 555  # committed_offset column
+        assert rows[0][3] == 555  # committed_offset column, not the placeholder offset from assignment()
+
+def test_write_heartbeat_reads_cached_watermark_so_the_loop_is_not_blocked():
+    conn = MagicMock()
+    consumer = build_heartbeat_consumer([FakeTopicPartition(partition=0, offset=1)])
+
+    with patch('txn_consumer.execute_values'):
+        write_heartbeat(conn, consumer, "test_group", "transactions", {})
+        assert consumer.get_watermark_offsets.call_args.kwargs["cached"] is True
+
+def test_write_heartbeat_writes_log_end_offset_per_partition():
+    conn = MagicMock()
+    consumer = build_heartbeat_consumer([FakeTopicPartition(partition=0, offset=900)], high_watermark=1200)
+
+    with patch('txn_consumer.execute_values') as mock_execute_values:
+        write_heartbeat(conn, consumer, "test_group", "transactions", {0: 10})
+        _, _, rows = mock_execute_values.call_args[0]
+        assert rows[0][4] == 1200  # log_end_offset column
+        assert rows[0][4] - rows[0][3] == 300  # consumer lag
+
+def test_write_heartbeat_writes_null_log_end_offset_when_watermark_lookup_fails():
+    conn = MagicMock()
+    consumer = build_heartbeat_consumer([FakeTopicPartition(partition=0, offset=900)])
+    consumer.get_watermark_offsets.side_effect = Exception("broker timeout")
+
+    with patch('txn_consumer.execute_values') as mock_execute_values:
+        write_heartbeat(conn, consumer, "test_group", "transactions", {0: 10})
+        _, _, rows = mock_execute_values.call_args[0]
+        assert rows[0][3] == 900
+        assert rows[0][4] is None
+
+def test_write_heartbeat_writes_null_log_end_offset_for_invalid_watermark():
+    conn = MagicMock()
+    consumer = build_heartbeat_consumer([FakeTopicPartition(partition=0, offset=900)], high_watermark=-1001)
+
+    with patch('txn_consumer.execute_values') as mock_execute_values:
+        write_heartbeat(conn, consumer, "test_group", "transactions", {0: 10})
+        _, _, rows = mock_execute_values.call_args[0]
+        assert rows[0][4] is None
 
 def test_write_heartbeat_sql_contains_upsert_on_conflict():
     conn = MagicMock()
-    consumer = MagicMock()
-    consumer.assignment.return_value = [FakeTopicPartition(partition=0, offset=1)]
+    consumer = build_heartbeat_consumer([FakeTopicPartition(partition=0, offset=1)])
 
     with patch('txn_consumer.execute_values') as mock_execute_values:
         write_heartbeat(conn, consumer, "test_group", "transactions", {})
         _, sql, _ = mock_execute_values.call_args[0]
         assert "ON CONFLICT (consumer_group, topic, partition)" in sql
         assert "DO UPDATE SET" in sql
+        assert "log_end_offset = EXCLUDED.log_end_offset" in sql
 
 
 # ── Function: write_alert and publish_alert ──────────────────────────────────
@@ -488,3 +529,27 @@ def test_run_does_not_buffer_invalid_message():
     dlq_producer.produce.assert_called_once()
     mock_flush.assert_not_called()
     consumer.commit.assert_not_called()
+
+def test_run_writes_final_heartbeat_after_final_commit_on_shutdown():
+    raw = json.dumps(build_transaction().model_dump(mode="json")).encode("utf-8")
+    consumer = MagicMock()
+    consumer.poll.side_effect = [FakeMessage(raw)]
+    calls = MagicMock()
+    consumer.commit.side_effect = lambda **kwargs: calls.commit()
+    polls = iter(range(2))
+
+    with patch('txn_consumer.flush_interval_ms', 10**9), \
+         patch('txn_consumer.heartbeat_interval_seconds', 3600), \
+         patch('txn_consumer.flush_buffer'), \
+         patch('txn_consumer.write_heartbeat', side_effect=lambda *args: calls.heartbeat(args[4])), \
+         patch('txn_consumer.logging'):
+        txn_consumer.run(
+            consumer, MagicMock(), MagicMock(), MagicMock(),
+            txn_consumer.WindowState(txn_consumer.window_config),
+            "test_group", "transactions", "alerts", "transactions.dlq",
+            should_stop=lambda: next(polls) >= 1,
+        )
+
+    # The buffered message is only flushed and committed by the shutdown path, the heartbeat must come after that commit.
+    assert [c[0] for c in calls.mock_calls] == ["commit", "heartbeat"]
+    assert calls.heartbeat.call_args[0][0] == {0: 1}   # messages_processed_by_partition

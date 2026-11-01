@@ -305,7 +305,7 @@ def smoke_run(smoke_topics):
             FROM raw.alerts WHERE transaction_id = ANY(%s::uuid[])
         """, (all_ids,))
         stored_transaction_ids = {r[0] for r in fetch_all(verify_conn, "SELECT transaction_id::text FROM raw.transactions WHERE transaction_id = ANY(%s::uuid[])", (all_ids,))}
-        heartbeat = fetch_all(verify_conn, "SELECT partition, committed_offset, messages_processed FROM ops.consumer_heartbeat WHERE consumer_group = %s", (CONSUMER_GROUP,))
+        heartbeat = fetch_all(verify_conn, "SELECT partition, committed_offset, messages_processed, log_end_offset FROM ops.consumer_heartbeat WHERE consumer_group = %s", (CONSUMER_GROUP,))
         answer_key = fetch_all(superuser_conn, "SELECT transaction_id::text, scenario_id::text, scenario_type FROM public.answer_key WHERE scenario_id = ANY(%s::uuid[])",
                                ([s["scenario_id"] for s in scenarios.values()],))
 
@@ -406,6 +406,11 @@ def test_detection_latency_is_wall_clock_and_bounded(smoke_run):
 def test_heartbeat_reports_consumer_progress(smoke_run):
     assert smoke_run["heartbeat"]
     assert sum(r[2] for r in smoke_run["heartbeat"]) > 0
+
+def test_heartbeat_reports_partition_end_offset_for_lag(smoke_run):
+    rows = [r for r in smoke_run["heartbeat"] if r[1] >= 0 and r[3] is not None]
+    assert rows                                         # at least one partition has a committed offset and a known end offset
+    assert all(r[3] >= r[1] for r in rows)              # lag = log_end_offset - committed_offset is never negative
 
 
 # ── Tests: restart and replay ────────────────────────────────────────────────

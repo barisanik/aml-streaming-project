@@ -30,3 +30,4 @@ postgres:
 
 heartbeat:
   interval_seconds: 10
+  offset_lookup_timeout_seconds: 1   # broker timeout for the committed offset lookup written to the heartbeat
