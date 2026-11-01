@@ -1,0 +1,77 @@
+# /grafana/provisioning/alerting/pipeline_alerts.yml
+# ============================================================
+#   Provisioning File: Pipeline Health Alerts
+# ============================================================
+#   Purpose:
+#     Raises an operational alarm when no transaction reaches raw.transactions for 2 minutes.
+#
+#   Logic:
+#    - The rule is evaluated every 10 seconds and fires as soon as the 2 minute count is 0.
+#      The alarm comes at most about 10 seconds after the 2 minute gap is reached.
+#    - It covers a stopped producer, a stopped consumer and a broken DB write, because all of them stop new inserts.
+#    - Notifications go to the same Slack webhook as notifier.py (NOTIFIER_WEBHOOK_URL).
+#      For a Discord webhook, add "/slack" to the end of the URL, Discord accepts Slack formatted messages there.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: aml-webhook
+    receivers:
+      - uid: aml-webhook
+        type: slack
+        settings:
+          url: ${NOTIFIER_WEBHOOK_URL}
+          title: "[AML pipeline] {{ .CommonLabels.alertname }} ({{ .Status }})"
+          text: "{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}"
+        disableResolveMessage: false
+
+policies:
+  - orgId: 1
+    receiver: aml-webhook
+    group_by: ["grafana_folder", "alertname"]
+    group_wait: 0s
+    group_interval: 1m
+    repeat_interval: 1h
+
+groups:
+  - orgId: 1
+    name: pipeline-health
+    folder: AML Platform
+    interval: 10s
+    rules:
+      - uid: no-transactions-2m
+        title: No transactions for 2 minutes
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: aml-postgres
+            model:
+              refId: A
+              editorMode: code
+              format: table
+              rawQuery: true
+              rawSql: "SELECT COUNT(*) AS transactions_last_2m FROM raw.transactions WHERE inserted_at >= now() - INTERVAL '2 minutes'"
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]
+        noDataState: Alerting
+        execErrState: Error
+        for: 0s
+        isPaused: false
+        labels:
+          severity: high
+          component: pipeline
+        annotations:
+          summary: "No transaction was written to raw.transactions in the last 2 minutes. Check txn_producer.py, txn_consumer.py and Postgres."
+          description: "Transactions written in the last 2 minutes: {{ (index .Values \"A\").Value }}"   # no $ here, provisioning files expand $ as env vars

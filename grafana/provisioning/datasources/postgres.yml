@@ -1,0 +1,31 @@
+# /grafana/provisioning/datasources/postgres.yml
+# ============================================================
+#   Provisioning File: Postgres Datasource
+# ============================================================
+#   Purpose:
+#     Connects Grafana to the aml_platform database as the read only app_grafana role.
+#
+#   Logic:
+#    - Grafana runs in the same compose network, so it uses the container port 5432, not the host port 5433.
+#    - The password comes from APP_GRAFANA_DB_PASSWORD, passed to the container by docker-compose.yml.
+#    - The fixed uid is referenced by the dashboard JSON and the alert rule.
+
+apiVersion: 1
+
+datasources:
+  - name: AML Postgres
+    uid: aml-postgres
+    type: grafana-postgresql-datasource
+    access: proxy
+    url: postgres:5432
+    user: app_grafana
+    isDefault: true
+    editable: false
+    jsonData:
+      database: aml_platform
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+      timeInterval: 10s
+    secureJsonData:
+      password: ${APP_GRAFANA_DB_PASSWORD}

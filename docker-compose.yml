@@ -63,11 +63,18 @@ services:
     image: grafana/grafana:latest
     container_name: grafana
     environment:
-      GF_DATE_FORMATS_DEFAULT_TIMEZONE: utc
+      GF_DATE_FORMATS_DEFAULT_TIMEZONE: UTC
+      GF_USERS_DEFAULT_LANGUAGE: en-US
+      APP_GRAFANA_DB_PASSWORD: ${APP_GRAFANA_DB_PASSWORD}   # read by the provisioned Postgres datasource
+      # Read by the provisioned alert contact point. Grafana refuses to start with an empty Slack URL,
+      # so an unset webhook falls back to a dead local address. The alarm still shows in the Grafana UI.
+      NOTIFIER_WEBHOOK_URL: ${NOTIFIER_WEBHOOK_URL:-http://127.0.0.1:9/webhook-not-configured}
     ports:
       - "3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro   # datasource, dashboard provider and alert rules
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro       # dashboard JSON files
     depends_on:
       - postgres
 

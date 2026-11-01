@@ -24,3 +24,5 @@ models:
       +materialized: table
     marts:
       +materialized: table
+      +grants:
+        select: ['app_grafana']   # Grafana reads only aggregated marts, never row level answer key data

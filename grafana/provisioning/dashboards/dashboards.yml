@@ -1,0 +1,23 @@
+# /grafana/provisioning/dashboards/dashboards.yml
+# ============================================================
+#   Provisioning File: Dashboard Provider
+# ============================================================
+#   Purpose:
+#     Loads every dashboard JSON under /etc/grafana/dashboards into the "AML Platform" folder.
+#
+#   Logic:
+#    - Dashboards are read only in the UI. Edit the JSON in grafana/dashboards and Grafana reloads it.
+
+apiVersion: 1
+
+providers:
+  - name: aml-platform
+    orgId: 1
+    folder: AML Platform
+    folderUid: aml-platform
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards

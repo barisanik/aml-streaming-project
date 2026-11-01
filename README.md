@@ -3,7 +3,7 @@
 
 > Proje Durumu: Devam ediyor.
 
-Bu proje sentetik banka işlem akışı üreten, bu akışı Kafka uyumlu bir event log (Redpanda) üzerinden gerçek zamanlı tüketen, kural tabanlı AML ve fraud tespiti yapan ve ham veriyi dbt incremental modelleriyle analitik katmana hazırlayan uçtan uca bir streaming veri platformudur. Grafana ile operasyonel izleme planlanmıştır.
+Bu proje sentetik banka işlem akışı üreten, bu akışı Kafka uyumlu bir event log (Redpanda) üzerinden gerçek zamanlı tüketen, kural tabanlı AML ve fraud tespiti yapan ve ham veriyi dbt incremental modelleriyle analitik katmana hazırlayan uçtan uca bir streaming veri platformudur. Akış Grafana ile operasyonel olarak izlenir.
 
 Sistem işlemleri saniyeler içinde değerlendirir, şüpheli davranış kalıplarını yakalar ve her alert'e hangi kuralın neden tetiklendiğini açıklayan bir gerekçe ekler.
 
@@ -33,7 +33,7 @@ Platform altı ana bileşenden oluşur:
 3. **Kural motoru (consumer)**, işlemleri tüketir, pydantic ile doğrular ve hesap bazlı zaman pencereleri üzerinde kuralları değerlendirir. Doğrulanan işlemler Postgres'e yazılır. Bir kural tetiklenirse alert önce Postgres'e, sonra Redpanda'daki `alerts` topic'ine yazılır.
 4. **Bildirim servisi (notifier)**, `alerts` topic'ini manuel offset commit ile dinler. Slack veya Discord webhook'una yapılandırılabilir retry ile bildirim gönderir. Webhook hata yanıtının gövdesi loglanır. SMTP ayarı vardır, gönderim henüz uygulanmamıştır.
 5. **dbt**, ham işlemleri, alert'leri ve answer key'i incremental staging modellerine dönüştürür. Değerlendirme modelleri alert'leri enjekte edilen senaryolarla eşleyip senaryo tipi bazında precision, recall ve detection latency hesaplar.
-6. **Grafana**, PostgreSQL'den operasyonel metrikleri görselleştirmek üzere planlanmıştır.
+6. **Grafana**, PostgreSQL'den okuduğu verilerle işlem hızını, alert oranını, detection latency'yi, consumer lag'i ve senaryo bazlı yakalama oranını gösterir. 2 dakika boyunca hiç işlem yazılmazsa alarm üretir.
 
 Tespit mantığı bellek içinde, analitik hesaplamalar ise SQL katmanında çalışır. Bu ayrım, hızlı tespit ile derinlemesine analizi birbirinden bağımsız tutar.
 
@@ -114,6 +114,21 @@ python scripts/postgres/reset_data.py --kafka
 
 Tablolar, roller ve yetkiler korunur, DDL'i tekrar çalıştırmak gerekmez. dbt modelleri bir sonraki koşuda yeniden oluşur.
 
+### Grafana
+
+`docker compose up -d` sonrası http://localhost:3000 adresinde "AML Platform" klasöründe "AML Pipeline Operations" dashboard'u elle kurulum gerekmeden gelir. İlk girişte kullanıcı adı `admin`, şifre `admin` yazabilirsiniz.
+
+- Grafana veritabanına salt okunur `app_grafana` kullanıcısıyla bağlanır, şifreyi `.env` içindeki `APP_GRAFANA_DB_PASSWORD` değerinden alır.
+- `app_grafana` answer key'i ve satır bazlı değerlendirme tablolarını göremez. Senaryo bazlı yakalama paneli yalnız toplu `analytics.mart_detection_performance` tablosunu okur, bu yetkiyi dbt verir.
+- Consumer lag, consumer'ın heartbeat ile yazdığı `log_end_offset - committed_offset` farkıdır.
+- "No transactions for 2 minutes" alarmı `raw.transactions` tablosuna 2 dakika boyunca yeni satır gelmezse tetiklenir ve `NOTIFIER_WEBHOOK_URL` adresine Slack mesajı gönderir. Discord kullanılıyorsa URL'nin sonuna `/slack` eklenmelidir. Webhook boşsa alarm yalnız Grafana arayüzünde görünür.
+
+Bu sürümden önce kurulmuş ve veri içeren bir veritabanında DDL'i tekrar çalıştırmak yerine aşağıdaki komut yeterlidir. Veri silmez, yalnız heartbeat'e `log_end_offset` sütununu, bir index'i ve Grafana yetkisini ekler:
+
+```bash
+python scripts/postgres/exec_02_grafana_access.py
+```
+
 ## Proje Kararları
 
 - **At-least-once ve idempotency:** Mesajların en az bir kez iletilmesi garanti edilir, aynı mesajın tekrar işlenmesi durumunda veri tekrar yazılmaz.
@@ -129,7 +144,7 @@ Tablolar, roller ve yetkiler korunur, DDL'i tekrar çalıştırmak gerekmez. dbt
 
 > Project Status: Work in progress
 
-This project showcases an end-to-end streaming data platform that generates a synthetic bank transaction stream, consumes it in real time through a Kafka compatible event log (Redpanda), applies rule based AML and fraud detection, and prepares raw data for an analytics layer with dbt incremental models. Operational monitoring with Grafana is a planned next step.
+This project showcases an end-to-end streaming data platform that generates a synthetic bank transaction stream, consumes it in real time through a Kafka compatible event log (Redpanda), applies rule based AML and fraud detection, and prepares raw data for an analytics layer with dbt incremental models. The stream is monitored operationally with Grafana.
 
 The system evaluates transactions within seconds, catches suspicious behavior patterns, and attaches a clear reason to every alert explaining which rule triggered it and why.
 
@@ -144,7 +159,7 @@ The system evaluates transactions within seconds, catches suspicious behavior pa
 | Data storage | PostgreSQL | Done |
 | Transformation | dbt-postgres, incremental staging models and precision/recall model | Done |
 | State management | In-memory sliding window and Redis | Sliding window is done for two rule, Redis planned |
-| Monitoring | Grafana (using PostgreSQL data source) | Planned |
+| Monitoring | Grafana (PostgreSQL data source, provisioned dashboard and alert) | Done |
 | Notification | Slack/Discord webhook and SMTP | Webhook done, SMTP planned |
 | Testing | pytest | Done |
 | CI/CD | GitHub Actions | Done |
@@ -159,7 +174,7 @@ The platform is built from six main components:
 3. The **rule engine (consumer)** consumes transactions, validates them with pydantic, and evaluates rules over per-account sliding time windows. Validated transactions are written to Postgres. When a rule fires, the alert is written to PostgreSQL first and then to the `alerts` topic in Redpanda.
 4. The **notifier** consumes the `alerts` topic with manual offset commits and sends Slack or Discord webhook notifications with configurable retries. It logs HTTP error response bodies. SMTP is configured but not implemented.
 5. **dbt** transforms raw transactions, alerts and the answer key into incremental staging models. Evaluation models match alerts to injected scenarios and calculate precision, recall and detection latency per scenario type.
-6. **Grafana** is planned to visualize operational metrics from PostgreSQL.
+6. **Grafana** reads from PostgreSQL and shows throughput, alert rate, detection latency, consumer lag and detection rate per scenario type. It raises an alarm when no transaction is written for 2 minutes.
 
 Detection logic runs in memory, while analytical calculations run in the SQL layer. This separation keeps fast detection and deeper analysis independent from each other.
 
@@ -237,6 +252,21 @@ python scripts/postgres/reset_data.py --kafka
 ```
 
 Tables, roles and grants are kept, so the DDL does not need to run again. dbt rebuilds its models on the next run.
+
+### Grafana
+
+After `docker compose up -d`, the "AML Pipeline Operations" dashboard is available at http://localhost:3000 in the "AML Platform" folder without any manual setup. First login details: `admin` / `admin`.
+
+- Grafana connects to the database as the read only `app_grafana` user and reads its password from `APP_GRAFANA_DB_PASSWORD` in `.env`.
+- `app_grafana` cannot read the answer key or the row level evaluation tables. The detection rate panel reads only the aggregated `analytics.mart_detection_performance` table, and dbt grants this access.
+- Consumer lag is `log_end_offset - committed_offset`, written by the consumer heartbeat.
+- The "No transactions for 2 minutes" alert fires when no new row reaches `raw.transactions` for 2 minutes and sends a Slack message to `NOTIFIER_WEBHOOK_URL`. For Discord, add `/slack` to the end of the URL. If the webhook is empty, the alert is only visible in the Grafana UI.
+
+For a database that was created before this version and already holds data, run the command below instead of the DDL. It does not delete data, it only adds the `log_end_offset` heartbeat column, an index and the Grafana grant:
+
+```bash
+python scripts/postgres/exec_02_grafana_access.py
+```
 
 ## Project Decisions
 
