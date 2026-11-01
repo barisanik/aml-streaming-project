@@ -220,8 +220,8 @@ __marimo__/
 # simulator/ .gitignore
 profiles.json
 
-# TODO/ .gitignore
-*.md
-
 # .vscode/ .gitignore
 settings.json
+
+*.md
+!/README.md

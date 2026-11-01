@@ -17,6 +17,7 @@
 
 import os
 import psycopg2
+import yaml
 from pathlib import Path
 import logging
 from datetime import datetime
@@ -26,6 +27,7 @@ load_dotenv()
 
 ### Initial parameters ###
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+CONFIG_PATH = PROJECT_ROOT / "configs" / "postgres_config.yml"
 LOG_DIR = PROJECT_ROOT / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)      # create logs folder if it does not exist yet
 
@@ -43,12 +45,15 @@ script_start_time = datetime.now()
 logging.info(f"Script started at {script_start_time}.")
 
 try:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        pg_config = yaml.safe_load(f)["postgres"]
+
     conn = psycopg2.connect(
-        host="localhost", 
-        port=5433,
+        host=pg_config["host"],
+        port=pg_config["port"],
         user=os.environ["POSTGRES_USER"],
         password=os.environ["POSTGRES_PASSWORD"], 
-        dbname="aml_platform"
+        dbname=pg_config["dbname"],
     )
     
     conn.autocommit = True

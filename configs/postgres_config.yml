@@ -1,0 +1,17 @@
+# /configs/postgres_config.yml
+# ============================================================
+#   Config File: Postgres Config
+# ============================================================
+#   Purpose:
+#     Connection parameters for the scripts/postgres/ bootstrap scripts
+#     (exec_01_init.py, set_role_passwords.py, verify_01_init_ddl.py).
+#
+#   Logic:
+#    - Superuser credentials are not stored here; they come from .env (POSTGRES_USER / POSTGRES_PASSWORD).
+#    - Host processes use the host port 5433 (mapped to container port 5432 in docker-compose.yml).
+#
+
+postgres:
+  host: "localhost"
+  port: 5433
+  dbname: "aml_platform"

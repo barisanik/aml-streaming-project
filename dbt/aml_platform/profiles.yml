@@ -3,8 +3,8 @@ aml_platform:
   outputs:
     dev:
       type: postgres
-      host: localhost
-      port: 5433
+      host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5433') | as_number }}"
       user: app_dbt
       password: "{{ env_var('APP_DBT_DB_PASSWORD') }}"
       dbname: aml_platform
