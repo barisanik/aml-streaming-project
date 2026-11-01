@@ -18,7 +18,7 @@ time_model:
  
 volume:
   target_transactions_per_simulated_day: 50000 # Transaction per day limit. Approximately 174 msg/sec at 300x compression.
- 
+  simulation_days: 10   # number of simulated days to run.
 arrival_process:
   distribution: "exponential"   # inter-arrival wait time sampling (numpy.random.exponential)
   base_rate_per_second: 0.579   # derived from target_transactions_per_simulated_day / 86400

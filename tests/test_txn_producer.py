@@ -348,3 +348,51 @@ def test_create_mule_fan_in_events_keep_one_target_and_planned_sources():
     assert all(payload["txn_type"] == "transfer_in" for payload in emitted_payloads)
     assert [payload["counterparty_id"] for payload in emitted_payloads] == scenario["mule_counterparty_ids"]
     assert sum(float(payload["amount"]) for payload in emitted_payloads) >= mule_rules["min_total_amount"]
+
+
+# ── Function: run_simulation ────────────────────────────────────────────────
+
+ALWAYS_TRIGGER = {
+    "capacity_available": {"true_possibility": 1, "false_possibility": 0},
+    "capacity_full": {"true_possibility": 0, "false_possibility": 1},
+}
+
+def run_short_simulation(days, transactions_per_day):
+    """Runs run_simulation without Kafka, DB or sleeping. Every free scenario slot is filled at once."""
+    calls = []
+
+    def record(current_sim_time, customer_profile, is_poisoned, scenario_details, conn):
+        calls.append({"is_poisoned": is_poisoned, "scenario_id": scenario_details["scenario_id"] if scenario_details else None})
+
+    with patch.object(txn_producer, "create_transaction_event", side_effect=record), \
+         patch.object(txn_producer.time, "sleep"), \
+         patch.dict(txn_producer.scenario["trigger_possibility"], ALWAYS_TRIGGER):
+        random.seed(0)
+        np.random.seed(0)
+        _, completed = txn_producer.run_simulation(FIXED_TIME, MagicMock(), days, transactions_per_day)
+    return calls, completed
+
+def test_run_simulation_finishes_every_started_scenario():
+    calls, completed = run_short_simulation(days=1, transactions_per_day=20)
+    started_ids = {c["scenario_id"] for c in calls if c["is_poisoned"]}
+
+    assert len(started_ids) == txn_producer.max_active_scenarios
+    assert {s["scenario_id"] for s in completed} == started_ids
+    for scenario in completed:
+        emitted = sum(1 for c in calls if c["scenario_id"] == scenario["scenario_id"])
+        assert emitted == scenario["scenario_length"]
+
+def test_run_simulation_starts_no_scenario_after_last_day():
+    days, transactions_per_day = 1, 20
+    calls, _ = run_short_simulation(days, transactions_per_day)
+    regular_phase_ids = {c["scenario_id"] for c in calls[:days * transactions_per_day] if c["scenario_id"]}
+    drain_phase_ids = {c["scenario_id"] for c in calls[days * transactions_per_day:] if c["scenario_id"]}
+
+    assert len(calls) > days * transactions_per_day       # drain produced the remaining scenario transactions
+    assert drain_phase_ids <= regular_phase_ids
+    assert any(not c["is_poisoned"] for c in calls[days * transactions_per_day:])   # normal traffic continues while draining
+
+def test_run_simulation_with_zero_days_produces_nothing():
+    calls, completed = run_short_simulation(days=0, transactions_per_day=20)
+    assert calls == []
+    assert completed == []

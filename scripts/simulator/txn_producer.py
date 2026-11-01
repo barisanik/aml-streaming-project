@@ -106,6 +106,7 @@ trough_transaction_hour = config["hourly_intensity_multiplier"]["trough_hour"]
 amplitude = config["hourly_intensity_multiplier"]["amplitude"]
 baseline = config["hourly_intensity_multiplier"]["baseline"]
 daily_transaction_limit = config["volume"]["target_transactions_per_simulated_day"]
+simulation_days = config["volume"]["simulation_days"]
 base_rate_per_second = config["arrival_process"]["base_rate_per_second"]    # average wait time between transactions for exponential distribution
 
 ## Kafka Producer
@@ -407,10 +408,88 @@ def create_producer(bootstrap_servers):
         "bootstrap.servers": bootstrap_servers,
     })
 
+def produce_next_transaction(current_sim_time, active_scenarios, completed_scenarios, conn, allow_new_scenarios=True) -> None:
+    """Produces one transaction: the next due scenario transaction if there is one, otherwise a normal transaction
+    that may start a new scenario when allow_new_scenarios is True."""
+    due_scenario = get_due_scenario(active_scenarios, current_sim_time)
+
+    if due_scenario is not None:    # If there is an active scenario going on with oncoming due date
+        # Create next transaction in scenario
+        trx_user = next(p for p in profiles if p["account_id"] == due_scenario["account_id"])   # Find scenario user
+        due_scenario["due_times"].pop(0)  # Remove consumed due time from the queue.
+
+        create_transaction_event(current_sim_time, trx_user, is_poisoned=True, scenario_details=due_scenario, conn=conn)
+
+        # Checks if scenario is over or not. If it is, removes from active_scenarios list and append it into completed_scenarios.
+        if not due_scenario["due_times"]:
+            active_scenarios.remove(due_scenario)
+            completed_scenarios.append(due_scenario)
+            logging.warning(f"SCENARIO COMPLETED: {due_scenario}")
+        return
+
+    trx_user = random.choice(profiles)
+
+    # Allows maximum max_active_scenarios active scenario at the same time.
+    if len(active_scenarios) >= max_active_scenarios:
+        trigger_possibility_true = scenario["trigger_possibility"]["capacity_full"]["true_possibility"]
+        trigger_possibility_false = scenario["trigger_possibility"]["capacity_full"]["false_possibility"]
+    else:
+        trigger_possibility_true = scenario["trigger_possibility"]["capacity_available"]["true_possibility"]
+        trigger_possibility_false = scenario["trigger_possibility"]["capacity_available"]["false_possibility"]
+
+    trigger_probability = allow_new_scenarios and random.choices([True,False],weights=[trigger_possibility_true, trigger_possibility_false])[0]
+
+    scenario_details = None
+    # If ml/fraud scenario creation triggered
+    if (trigger_probability):
+        scenario_type_names = list(scenario["scenario_types"].keys())
+        scenario_type_name = random.choice(scenario_type_names)         # Randomly pick ml/fraud scenario
+
+        scenario_type = scenario["scenario_types"][scenario_type_name]  # Get relevant config of selected scenario type
+
+        # Check if randomly selected account is in an active scenario or not. If it is select another account.
+        active_account_ids = {s["account_id"] for s in active_scenarios}
+        while trx_user["account_id"] in active_account_ids:
+            trx_user = random.choice(profiles)
+
+        scenario_details = create_scenario(current_sim_time=current_sim_time, customer_profile=trx_user, scenario_type=scenario_type)
+        active_scenarios.append(scenario_details)
+
+    create_transaction_event(current_sim_time, trx_user, is_poisoned=trigger_probability, scenario_details=scenario_details, conn=conn)
+
+def advance_clock(current_sim_time):
+    """Moves the simulated clock to the next arrival and sleeps the compressed real time."""
+    wait_time = create_wait_time(rate=base_rate_per_second, time=current_sim_time)
+    time.sleep(wait_time / time_compression_factor)
+    return current_sim_time + timedelta(seconds=wait_time)
+
+def run_simulation(current_sim_time, conn, days, transactions_per_day):
+    """
+    Runs the simulation for the given number of days, then drains: normal traffic continues without new
+    scenarios until every active scenario has produced all of its transactions. This way no scenario series
+    is cut off when the producer stops. Returns the final simulated time and the completed scenarios.
+    """
+    active_scenarios = []
+    completed_scenarios = []
+
+    for day in range(days):
+        logging.info(f"Day: {day}")
+        for _ in range(transactions_per_day):
+            produce_next_transaction(current_sim_time, active_scenarios, completed_scenarios, conn)
+            current_sim_time = advance_clock(current_sim_time)
+
+    logging.info(f"Days finished, finishing active scenarios | active={len(active_scenarios)}")
+    while active_scenarios:
+        produce_next_transaction(current_sim_time, active_scenarios, completed_scenarios, conn, allow_new_scenarios=False)
+        current_sim_time = advance_clock(current_sim_time)
+
+    logging.info(f"All scenarios finished | completed={len(completed_scenarios)}")
+    return current_sim_time, completed_scenarios
+
 def main(current_sim_time) -> None:
     global producer
     producer = create_producer(config["kafka"]["bootstrap_servers"])
-    logging.info(f"Simulation started at {current_sim_time}")
+    logging.info(f"Simulation started at {current_sim_time} | days={simulation_days}")
 
     # Establish connection with PostgreSQL db.
     conn = psycopg2.connect(
@@ -421,61 +500,8 @@ def main(current_sim_time) -> None:
         dbname=     config["postgres"]["dbname"],
     )
     conn.autocommit = True
-    active_scenarios = []
-    completed_scenarios = []
 
-    for day in range(0,10):
-        logging.info(f"Day: {day}")
-        for i in range(0, daily_transaction_limit):
-
-            due_scenario = get_due_scenario(active_scenarios, current_sim_time)
-
-            if due_scenario is not None:    # If there is an active scenario going on with oncoming due date
-                # Create next transaction in scenario
-                trx_user = next(p for p in profiles if p["account_id"] == due_scenario["account_id"])   # Find scenario user
-                due_scenario["due_times"].pop(0)  # Remove consumed due time from the queue.
-
-                create_transaction_event(current_sim_time, trx_user, is_poisoned=True, scenario_details=due_scenario, conn=conn)
-
-                # Checks if scenario is over or not. If it is, removes from active_scenarios list and append it into completed_scenarios.
-                if not due_scenario["due_times"]:
-                    active_scenarios.remove(due_scenario)
-                    completed_scenarios.append(due_scenario)
-                    logging.warning(f"SCENARIO COMPLETED: {due_scenario}")
-            else:
-                trx_user = random.choice(profiles)
-
-                # Allows maximum max_active_scenarios active scenario at the same time.
-                if len(active_scenarios) >= max_active_scenarios:
-                    trigger_possibility_true = scenario["trigger_possibility"]["capacity_full"]["true_possibility"]
-                    trigger_possibility_false = scenario["trigger_possibility"]["capacity_full"]["false_possibility"]
-                else:
-                    trigger_possibility_true = scenario["trigger_possibility"]["capacity_available"]["true_possibility"]
-                    trigger_possibility_false = scenario["trigger_possibility"]["capacity_available"]["false_possibility"]
-
-                trigger_probability = random.choices([True,False],weights=[trigger_possibility_true, trigger_possibility_false])[0]
-                
-                scenario_details = None
-                # If ml/fraud scenario creation triggered
-                if (trigger_probability):
-                    scenario_type_names = list(scenario["scenario_types"].keys())   
-                    scenario_type_name = random.choice(scenario_type_names)         # Randomly pick ml/fraud scenario
-                    
-                    scenario_type = scenario["scenario_types"][scenario_type_name]  # Get relevant config of selected scenario type
-                    
-                    # Check if randomly selected account is in an active scenario or not. If it is select another account.
-                    active_account_ids = {s["account_id"] for s in active_scenarios}
-                    while trx_user["account_id"] in active_account_ids:
-                        trx_user = random.choice(profiles)
-
-                    scenario_details = create_scenario(current_sim_time=current_sim_time, customer_profile=trx_user, scenario_type=scenario_type)
-                    active_scenarios.append(scenario_details)
-                
-                create_transaction_event(current_sim_time, trx_user, is_poisoned=trigger_probability, scenario_details=scenario_details, conn=conn)
-                
-            wait_time = create_wait_time(rate=base_rate_per_second, time=current_sim_time)
-            current_sim_time = current_sim_time + timedelta(seconds=wait_time)
-            time.sleep(wait_time / time_compression_factor)
+    current_sim_time, _ = run_simulation(current_sim_time, conn, simulation_days, daily_transaction_limit)
 
     conn.close()
     producer.flush()
