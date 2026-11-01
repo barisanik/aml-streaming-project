@@ -102,26 +102,36 @@ smurfing_severity = scenario_config["smurfing"]["severity"]
 mule_fan_in_rule_id = scenario_config["mule_fan_in"]["rule_id"]
 mule_fan_in_severity = scenario_config["mule_fan_in"]["severity"]
 
-# Kafka Consumer setup
-consumer = confluent_kafka.Consumer({
-    "bootstrap.servers": config["kafka"]["bootstrap_servers"],
-    "group.id": consumer_group,
-    "auto.offset.reset": "earliest",   # Start from beginning if no committed offset exists yet
-    "enable.auto.commit": False,       # Commit manually, only after a successful batch flush
-})
-consumer.subscribe([transactions_topic])
-
-# Kafka producer setup for dlq (dead letter queue). Aims to keep transactions that fail validation.
-dlq_producer = confluent_kafka.Producer({
-    "bootstrap.servers": config["kafka"]["bootstrap_servers"],
-})
-
-# Kafka producer setup for alerts
-alert_producer = confluent_kafka.Producer({
-    "bootstrap.servers": config["kafka"]["bootstrap_servers"],
-})
-
 ## FUNCTIONS
+def create_consumer(bootstrap_servers, group_id, topic):
+    """Creates a Kafka consumer subscribed to the transactions topic. Offsets are committed manually."""
+    consumer = confluent_kafka.Consumer({
+        "bootstrap.servers": bootstrap_servers,
+        "group.id": group_id,
+        "auto.offset.reset": "earliest",   # Start from beginning if no committed offset exists yet
+        "enable.auto.commit": False,       # Commit manually, only after a successful batch flush
+    })
+    consumer.subscribe([topic])
+    return consumer
+
+def create_producer(bootstrap_servers):
+    """Creates a Kafka producer. Used for the DLQ (invalid transactions) and for alerts."""
+    return confluent_kafka.Producer({
+        "bootstrap.servers": bootstrap_servers,
+    })
+
+def connect_postgres(postgres_config, password):
+    """Opens an autocommit Postgres connection with the given connection settings."""
+    conn = psycopg2.connect(
+        host=       postgres_config["host"],
+        port=       postgres_config["port"],
+        user=       postgres_config["user"],
+        password=   password,
+        dbname=     postgres_config["dbname"],
+    )
+    conn.autocommit = True
+    return conn
+
 def dlq_delivery_callback(err, msg):
     """Logs writing error of DLQ messages."""
     if err is not None:
@@ -297,28 +307,75 @@ def publish_alert(producer, topic, alert):
     )
     producer.poll(0)
 
-def main() -> None:
+def parse_transaction(transaction_raw, dlq_producer, dlq_topic):
+    """Validates a raw message. Invalid payloads are sent to the DLQ as original bytes and None is returned."""
+    try:
+        transaction_dict = json.loads(transaction_raw)
+        return Transaction(**transaction_dict)                  # Validates transaction details
+    except (json.JSONDecodeError, ValidationError) as e:        # If validation fails, write message to dead letter queue.
+        logging.error(f"Validation failed, transaction sent to DLQ | error={e}")
+        try:
+            dlq_producer.produce(
+                topic=dlq_topic,
+                value=transaction_raw,   # Send the original raw bytes
+                callback=dlq_delivery_callback,
+            )
+            dlq_producer.poll(0)
+        except Exception as dlq_err:
+            logging.critical(f"DLQ publish failed | error={dlq_err}")
+        return None
 
-    ## Postgres connection setup
-    conn = psycopg2.connect(
-        host=       config["postgres"]["host"],
-        port=       config["postgres"]["port"],
-        user=       config["postgres"]["user"],
-        password=   os.environ["APP_CONSUMER_DB_PASSWORD"],
-        dbname=     config["postgres"]["dbname"],
-    )
-    conn.autocommit = True
+def evaluate_transaction(conn, window_state, alert_producer, alerts_topic, transaction):
+    """Adds a transaction to every rule window, writes triggered alerts to raw.alerts and publishes them afterwards."""
+    window_state.add_transaction("structuring", transaction)
+    window_state.add_transaction("smurfing", transaction)
+    window_state.add_transaction("mule_fan_in", transaction)
 
-    window_state = WindowState(window_config)
+    alert_time = datetime.now(timezone.utc)
 
-    logging.info("Consumer started")
+    # Check if recent activites are suspicious or not.
+    is_structuring, structuring_txns = check_structuring(window_state, transaction.account_id)
+    is_smurfing, smurfing_txns = check_smurfing(window_state, transaction.account_id)
+    is_mule_fan_in, mule_fan_in_txns = check_mule_fan_in(window_state, transaction.account_id)
+
+    # If it is, insert related information to raw.alerts first, then publish and log them.
+    alerts = []
+    if is_structuring:
+        alert = write_alert(conn, transaction, structuring_rule_id, "structuring", structuring_severity, structuring_txns, alert_time)
+        publish_alert(alert_producer, alerts_topic, alert)
+        alerts.append(alert)
+        logging.warning(f"Structuring rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
+    if is_smurfing:
+        alert = write_alert(conn, transaction, smurfing_rule_id, "smurfing", smurfing_severity, smurfing_txns, alert_time)
+        publish_alert(alert_producer, alerts_topic, alert)
+        alerts.append(alert)
+        logging.warning(f"Smurfing rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
+    if is_mule_fan_in:
+        alert = write_alert(
+            conn,
+            transaction,
+            mule_fan_in_rule_id,
+            "mule_fan_in",
+            mule_fan_in_severity,
+            mule_fan_in_txns,
+            alert_time,
+            metrics=summarize_mule_fan_in(mule_fan_in_txns),
+        )
+        publish_alert(alert_producer, alerts_topic, alert)
+        alerts.append(alert)
+        logging.warning(f"Mule fan-in rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
+
+    return alerts
+
+def run(consumer, dlq_producer, alert_producer, conn, window_state, consumer_group, transactions_topic, alerts_topic, dlq_topic, should_stop=lambda: False):
+    """Consume loop. Runs until should_stop() returns True or KeyboardInterrupt, then flushes the remaining buffer."""
     buffer = [] # Transaction buffer
     last_flush_time = datetime.now()
     last_heartbeat_time = datetime.now()
     messages_processed_by_partition = {}  # {partition_number: count}
 
     try:
-        while True:
+        while not should_stop():
             msg = consumer.poll(timeout=1.0)    # Checks for new transactions
 
             heartbeat_elapsed_s = (datetime.now() - last_heartbeat_time).total_seconds()
@@ -329,75 +386,23 @@ def main() -> None:
                 except Exception as e:
                     logging.error(f"Heartbeat write failed | error={e}")
 
-            if msg is None:     # If no message found in queue, loop again.
-                continue
-            
-            if msg.error():     # If message is broken log message error and loop again.
+            if msg is not None and msg.error():     # If message is broken log message error.
                 logging.error(f"Consumer error | error={msg.error()}")
-                continue
-            
-            transaction_raw = msg.value()
-            try:
-                transaction_dict = json.loads(transaction_raw)
-                transaction = Transaction(**transaction_dict)           # Validates transaction details
-            except (json.JSONDecodeError, ValidationError) as e:        # If validation fails, write message to dead letter queue, and loop again.
-                logging.error(f"Validation failed, transaction sent to DLQ | error={e}")
-                try:
-                    dlq_producer.produce(
-                        topic=dlq_topic,
-                        value=transaction_raw,   # Send the original raw bytes
-                        callback=dlq_delivery_callback,
-                    )
-                    dlq_producer.poll(0)
-                except Exception as dlq_err:
-                    logging.critical(f"DLQ publish failed | error={dlq_err}")
-                continue
+            elif msg is not None:
+                transaction = parse_transaction(msg.value(), dlq_producer, dlq_topic)
+                if transaction is not None:
+                    buffer.append(transaction)  # Add transaction to buffer, waiting for flush on batch max size limit or flush interval.
+                    evaluate_transaction(conn, window_state, alert_producer, alerts_topic, transaction)
 
-            buffer.append(transaction)  # Add transaction to buffer, waiting for flush on batch max size limit or flush interval.
+                    partition = msg.partition() # Get partition number from Kafka.
+                    messages_processed_by_partition[partition] = messages_processed_by_partition.get(partition, 0) + 1  # Increase per-partition processed message count.
 
-            window_state.add_transaction("structuring", transaction)
-            window_state.add_transaction("smurfing", transaction)
-            window_state.add_transaction("mule_fan_in", transaction)
-
-            alert_time = datetime.now(timezone.utc)
-
-            # Check if recent activites are suspicious or not.
-            is_structuring, structuring_txns = check_structuring(window_state, transaction.account_id)
-            is_smurfing, smurfing_txns = check_smurfing(window_state, transaction.account_id)
-            is_mule_fan_in, mule_fan_in_txns = check_mule_fan_in(window_state, transaction.account_id)
-
-            # If it is, insert related information to raw.alerts and log them.
-            if is_structuring:
-                alert = write_alert(conn, transaction, structuring_rule_id, "structuring", structuring_severity, structuring_txns, alert_time)
-                publish_alert(alert_producer, alerts_topic, alert)
-                logging.warning(f"Structuring rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
-            if is_smurfing: 
-                alert = write_alert(conn, transaction, smurfing_rule_id, "smurfing", smurfing_severity, smurfing_txns, alert_time)
-                publish_alert(alert_producer, alerts_topic, alert)
-                logging.warning(f"Smurfing rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
-            if is_mule_fan_in:
-                alert = write_alert(
-                    conn,
-                    transaction,
-                    mule_fan_in_rule_id,
-                    "mule_fan_in",
-                    mule_fan_in_severity,
-                    mule_fan_in_txns,
-                    alert_time,
-                    metrics=summarize_mule_fan_in(mule_fan_in_txns),
-                )
-                publish_alert(alert_producer, alerts_topic, alert)
-                logging.warning(f"Mule fan-in rule triggered | account id:{transaction.account_id} | transaction id:{transaction.transaction_id}")
-            
-            partition = msg.partition() # Get partition number from Kafka.
-            messages_processed_by_partition[partition] = messages_processed_by_partition.get(partition, 0) + 1  # Increase per-partition processed message count.
-
-            # Calculate milliseconds since last flush.
+            # Checked on idle polls too, so the last batch is not held back until the next message arrives.
             elapsed_ms = (datetime.now() - last_flush_time).total_seconds() * 1000
-            if len(buffer) >= batch_max_size or elapsed_ms >= flush_interval_ms:    # If it is more than [flush_interval_ms] ms or buffer has [batch_max_size] or more transactions
+            if buffer and (len(buffer) >= batch_max_size or elapsed_ms >= flush_interval_ms):    # If it is more than [flush_interval_ms] ms or buffer has [batch_max_size] or more transactions
                 try:
                     flush_buffer(conn, buffer)                                          # Record transactions from buffer to Postgres.
-                    consumer.commit()                                                   # Commit Kafka offset.
+                    consumer.commit(asynchronous=False)                                 # Commit Kafka offset.
                     logging.info(f"Flushed {len(buffer)} records to raw.transactions")  # Log the flush result.
                     buffer.clear()                                                      # Clear buffer.
                     last_flush_time = datetime.now()                                    # Update last flush time.
@@ -411,11 +416,25 @@ def main() -> None:
         if buffer:                                          # If loop is broken and buffer is not empty, flush remaining transactions in buffer for the last time.
             try:
                 flush_buffer(conn, buffer)
-                consumer.commit()
+                consumer.commit(asynchronous=False)
                 logging.info(f"Final flush: {len(buffer)} records written before shutdown")
             except Exception as e:
                 logging.critical(f"Final flush failed | error={e}")
 
+def main() -> None:
+
+    bootstrap_servers = config["kafka"]["bootstrap_servers"]
+    conn = connect_postgres(config["postgres"], os.environ["APP_CONSUMER_DB_PASSWORD"])
+    consumer = create_consumer(bootstrap_servers, consumer_group, transactions_topic)
+    dlq_producer = create_producer(bootstrap_servers)       # Keeps transactions that fail validation.
+    alert_producer = create_producer(bootstrap_servers)
+
+    window_state = WindowState(window_config)
+
+    logging.info("Consumer started")
+    try:
+        run(consumer, dlq_producer, alert_producer, conn, window_state, consumer_group, transactions_topic, alerts_topic, dlq_topic)
+    finally:
         conn.close()
         dlq_producer.flush()
         alert_producer.flush()
@@ -423,11 +442,11 @@ def main() -> None:
         logging.info("Consumer closed")
 
 if __name__ == "__main__":
-    
+
     script_start_time = datetime.now()
     logging.info(f"Script started at {script_start_time}.")
 
     main()
-    
+
     script_end_time = datetime.now()
     logging.info(f"Script ended at {script_end_time}. Execution duration: {script_end_time - script_start_time}")

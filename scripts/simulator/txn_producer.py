@@ -108,10 +108,8 @@ baseline = config["hourly_intensity_multiplier"]["baseline"]
 daily_transaction_limit = config["volume"]["target_transactions_per_simulated_day"]
 base_rate_per_second = config["arrival_process"]["base_rate_per_second"]    # average wait time between transactions for exponential distribution
 
-## Kafka Reader Parameters
-producer = confluent_kafka.Producer({
-    "bootstrap.servers": config["kafka"]["bootstrap_servers"],
-})
+## Kafka Producer
+producer = None
 
 ## FUNCTIONS
 
@@ -403,7 +401,15 @@ def create_transaction_event(current_sim_time, customer_profile, is_poisoned, sc
         "produced_at":      produced_at
     }
 
-def main(current_sim_time,producer) -> None:
+def create_producer(bootstrap_servers):
+    """Creates the Kafka producer that publishes transactions."""
+    return confluent_kafka.Producer({
+        "bootstrap.servers": bootstrap_servers,
+    })
+
+def main(current_sim_time) -> None:
+    global producer
+    producer = create_producer(config["kafka"]["bootstrap_servers"])
     logging.info(f"Simulation started at {current_sim_time}")
 
     # Establish connection with PostgreSQL db.
@@ -480,7 +486,7 @@ if __name__ == "__main__":
     script_start_time = datetime.now()
     logging.info(f"Script started at {script_start_time}.")
 
-    main(current_sim_time=simulation_start_time, producer=producer)
+    main(current_sim_time=simulation_start_time)
     
     script_end_time = datetime.now()
     logging.info(f"Script ended at {script_end_time}. Execution duration: {script_end_time - script_start_time}")

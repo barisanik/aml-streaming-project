@@ -286,3 +286,151 @@ def test_mule_fan_in_alert_persists_metrics_before_publish():
     mock_execute_values.assert_called_once()
     assert producer.produce.call_count == 1
     assert json.loads(producer.produce.call_args.kwargs["value"])["window_summary"]["metrics"] == metrics
+
+
+# ── Function: parse_transaction ──────────────────────────────────────────────
+
+def test_parse_transaction_returns_valid_transaction():
+    dlq_producer = MagicMock()
+    raw = json.dumps(build_transaction().model_dump(mode="json")).encode("utf-8")
+
+    transaction = txn_consumer.parse_transaction(raw, dlq_producer, "transactions.dlq")
+
+    assert transaction.transaction_id == build_transaction().transaction_id
+    dlq_producer.produce.assert_not_called()
+
+def test_parse_transaction_sends_original_bytes_to_dlq_on_invalid_payload():
+    dlq_producer = MagicMock()
+    raw = b'{"transaction_id": "not-a-full-transaction"}'
+
+    with patch('txn_consumer.logging.error'):
+        transaction = txn_consumer.parse_transaction(raw, dlq_producer, "transactions.dlq")
+
+    assert transaction is None
+    produce_kwargs = dlq_producer.produce.call_args.kwargs
+    assert produce_kwargs["topic"] == "transactions.dlq"
+    assert produce_kwargs["value"] == raw
+
+
+# ── Function: evaluate_transaction ───────────────────────────────────────────
+
+def build_structuring_series():
+    return [
+        build_transaction(f"0000000{i}-1111-1111-1111-111111111111").model_copy(update={
+            "txn_type": TxnType.CASH_DEPOSIT,
+            "counterparty_id": "ATM-12345678",
+            "amount": Decimal("9000.00"),
+            "event_time": datetime(2026, 1, 1, 12, 0, 0) + timedelta(hours=i),
+        })
+        for i in range(3)
+    ]
+
+def test_evaluate_transaction_writes_alert_to_db_before_publishing():
+    calls = MagicMock()
+    window_state = txn_consumer.WindowState(txn_consumer.window_config)
+
+    with patch('txn_consumer.execute_values', side_effect=lambda *a, **k: calls.db_write()), \
+         patch('txn_consumer.logging.warning'):
+        calls.producer.produce.side_effect = lambda *a, **k: calls.publish()
+        alerts = []
+        for transaction in build_structuring_series():
+            alerts = txn_consumer.evaluate_transaction(MagicMock(), window_state, calls.producer, "alerts", transaction)
+
+    assert [a.rule_id for a in alerts] == ["R-001"]
+    called = [c[0] for c in calls.mock_calls if c[0] in ("db_write", "publish")]
+    assert called == ["db_write", "publish"]
+
+def test_evaluate_transaction_returns_no_alert_below_threshold():
+    window_state = txn_consumer.WindowState(txn_consumer.window_config)
+    producer = MagicMock()
+
+    with patch('txn_consumer.execute_values') as mock_execute_values:
+        alerts = txn_consumer.evaluate_transaction(MagicMock(), window_state, producer, "alerts", build_transaction())
+
+    assert alerts == []
+    mock_execute_values.assert_not_called()
+    producer.produce.assert_not_called()
+
+
+# ── Function: run ────────────────────────────────────────────────────────────
+
+class FakeMessage:
+    def __init__(self, value, partition=0):
+        self._value = value
+        self._partition = partition
+
+    def value(self):
+        return self._value
+
+    def partition(self):
+        return self._partition
+
+    def error(self):
+        return None
+
+
+def run_with_messages(messages, poll_count):
+    """Runs the consume loop for a fixed number of polls. Returns the fake consumer and DLQ producer."""
+    consumer = MagicMock()
+    consumer.poll.side_effect = messages + [None] * (poll_count - len(messages))
+    dlq_producer = MagicMock()
+    polls = iter(range(poll_count + 1))
+
+    with patch('txn_consumer.flush_interval_ms', 0), \
+         patch('txn_consumer.heartbeat_interval_seconds', 3600), \
+         patch('txn_consumer.flush_buffer') as mock_flush, \
+         patch('txn_consumer.logging'):
+        txn_consumer.run(
+            consumer, dlq_producer, MagicMock(), MagicMock(),
+            txn_consumer.WindowState(txn_consumer.window_config),
+            "test_group", "transactions", "alerts", "transactions.dlq",
+            should_stop=lambda: next(polls) >= poll_count,
+        )
+    return consumer, dlq_producer, mock_flush
+
+def test_run_flushes_and_commits_buffered_transaction():
+    raw = json.dumps(build_transaction().model_dump(mode="json")).encode("utf-8")
+
+    consumer, _, mock_flush = run_with_messages([FakeMessage(raw)], poll_count=2)
+
+    flushed_buffer = mock_flush.call_args_list[0][0][1]
+    assert mock_flush.call_count == 1
+    assert consumer.commit.call_count == 1
+    assert flushed_buffer == []     # Buffer is cleared after a successful flush
+
+def test_run_flushes_on_idle_poll_without_waiting_for_next_message():
+    raw = json.dumps(build_transaction().model_dump(mode="json")).encode("utf-8")
+    consumer = MagicMock()
+    consumer.poll.side_effect = [FakeMessage(raw), None]
+    polls = iter(range(3))
+
+    with patch('txn_consumer.flush_interval_ms', 10**9), \
+         patch('txn_consumer.heartbeat_interval_seconds', 3600), \
+         patch('txn_consumer.flush_buffer') as mock_flush, \
+         patch('txn_consumer.logging'):
+        started = {"flushed_while_running": False}
+
+        def stop():
+            n = next(polls)
+            if n == 1:      # After the message poll: make the interval elapse for the following idle poll
+                txn_consumer.flush_interval_ms = 0
+            if n == 2:
+                started["flushed_while_running"] = mock_flush.called
+            return n >= 2
+
+        txn_consumer.run(
+            consumer, MagicMock(), MagicMock(), MagicMock(),
+            txn_consumer.WindowState(txn_consumer.window_config),
+            "test_group", "transactions", "alerts", "transactions.dlq",
+            should_stop=stop,
+        )
+
+    assert started["flushed_while_running"] is True
+    assert mock_flush.call_count == 1   # No final flush needed, buffer was already empty
+
+def test_run_does_not_buffer_invalid_message():
+    consumer, dlq_producer, mock_flush = run_with_messages([FakeMessage(b"not json")], poll_count=2)
+
+    dlq_producer.produce.assert_called_once()
+    mock_flush.assert_not_called()
+    consumer.commit.assert_not_called()
