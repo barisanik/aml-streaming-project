@@ -223,5 +223,6 @@ profiles.json
 # .vscode/ .gitignore
 settings.json
 
+*.html
 *.md
 !/README.md
