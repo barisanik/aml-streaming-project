@@ -52,6 +52,29 @@ mule_fan_in_min_count = scenario_types["mule_fan_in"]["min_count"]
 mule_fan_in_min_distinct_counterparties = scenario_types["mule_fan_in"]["min_distinct_counterparties"]
 mule_fan_in_min_total_amount = scenario_types["mule_fan_in"]["min_total_amount"]
 
+## QUALIFYING TRANSACTIONS
+# A transaction qualifies for a rule when the rule counts it in its window.
+# The consumer raises an alert only when the incoming transaction itself qualifies,
+# so unrelated activity on a flagged account does not produce repeated alerts.
+
+def qualifies_structuring(transaction):
+    """Cash amount just under the reporting threshold."""
+    return structuring_limit_min <= transaction.amount <= structuring_limit_max
+
+def qualifies_smurfing(transaction):
+    """Small outgoing transfer."""
+    return (
+        transaction.txn_type.value == scenario_types["smurfing"]["forced_txn_type"]
+        and smurfing_limit_min <= transaction.amount <= smurfing_limit_max
+    )
+
+def qualifies_mule_fan_in(transaction):
+    """Incoming transfer in the mule amount range."""
+    return (
+        transaction.txn_type.value == scenario_types["mule_fan_in"]["forced_txn_type"]
+        and mule_fan_in_limit_min <= transaction.amount <= mule_fan_in_limit_max
+    )
+
 def check_structuring(window_state, account_id):
     """Checks if an account's structuring window triggers the rule."""
 
@@ -60,7 +83,7 @@ def check_structuring(window_state, account_id):
     total_amount = 0
 
     for transaction in account_txn_list:
-        if structuring_limit_min <= transaction.amount <= structuring_limit_max:
+        if qualifies_structuring(transaction):
             filtered_transactions.append(transaction)
             total_amount += transaction.amount
 
@@ -77,10 +100,7 @@ def check_smurfing(window_state, account_id):
     account_txn_list = window_state.windows["smurfing"][account_id]
     filtered_transactions = []
     for transaction in account_txn_list:
-        if (
-            transaction.txn_type.value == scenario_types["smurfing"]["forced_txn_type"]
-            and smurfing_limit_min <= transaction.amount <= smurfing_limit_max
-        ):
+        if qualifies_smurfing(transaction):
             filtered_transactions.append(transaction)
 
     is_triggered = len(filtered_transactions) >= smurfing_min_count
@@ -98,10 +118,7 @@ def check_mule_fan_in(window_state, account_id):
     filtered_transactions = [
         transaction
         for transaction in account_txn_list
-        if (
-            transaction.txn_type.value == scenario_types["mule_fan_in"]["forced_txn_type"]
-            and mule_fan_in_limit_min <= transaction.amount <= mule_fan_in_limit_max
-        )
+        if qualifies_mule_fan_in(transaction)
     ]
     total_amount = sum((transaction.amount for transaction in filtered_transactions), start=0)
     distinct_counterparties = {

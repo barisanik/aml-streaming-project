@@ -140,9 +140,9 @@ def replay_rules_in_memory(payloads):
     """Expected (transaction_id, rule_id) pairs: runs the produced payloads through WindowState and the rule functions."""
     window_state = WindowState(txn_consumer.window_config)
     checks = (
-        (txn_consumer.structuring_rule_id, txn_consumer.check_structuring),
-        (txn_consumer.smurfing_rule_id, txn_consumer.check_smurfing),
-        (txn_consumer.mule_fan_in_rule_id, txn_consumer.check_mule_fan_in),
+        (txn_consumer.structuring_rule_id, txn_consumer.check_structuring, txn_consumer.qualifies_structuring),
+        (txn_consumer.smurfing_rule_id, txn_consumer.check_smurfing, txn_consumer.qualifies_smurfing),
+        (txn_consumer.mule_fan_in_rule_id, txn_consumer.check_mule_fan_in, txn_consumer.qualifies_mule_fan_in),
     )
     expected = set()
     for raw in payloads:
@@ -152,8 +152,8 @@ def replay_rules_in_memory(payloads):
             continue
         for family in RULE_FAMILIES:
             window_state.add_transaction(family, transaction)
-        for rule_id, check in checks:
-            if check(window_state, transaction.account_id)[0]:
+        for rule_id, check, qualifies in checks:
+            if qualifies(transaction) and check(window_state, transaction.account_id)[0]:
                 expected.add((transaction.transaction_id, rule_id))
     return expected
 

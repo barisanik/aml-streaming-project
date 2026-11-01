@@ -21,7 +21,15 @@ sys.path.insert(0, str(DETECTOR_DIR))
 from schemas import Transaction, TxnType
 from window_state import WindowState
 import rule_engine
-from rule_engine import check_mule_fan_in, check_smurfing, check_structuring, summarize_mule_fan_in
+from rule_engine import (
+    check_mule_fan_in,
+    check_smurfing,
+    check_structuring,
+    qualifies_mule_fan_in,
+    qualifies_smurfing,
+    qualifies_structuring,
+    summarize_mule_fan_in,
+)
 
 
 def load_config(path: Path) -> dict:
@@ -530,3 +538,41 @@ def test_mule_fan_in_summary_contains_explainable_metrics():
     assert summary["distinct_counterparty_count"] == mule_fan_in_min_distinct_counterparties
     assert summary["total_amount"] == str(mule_fan_in_min_total_amount)
     assert summary["thresholds"]["min_total_amount"] == mule_fan_in_min_total_amount
+
+
+# ── Qualifying transactions ─────────────────────────────────────────────────
+
+def build_single(txn_type, amount):
+    return Transaction(
+        transaction_id="test-id-q",
+        account_id="acc-1",
+        counterparty_id="acc-2",
+        amount=amount,
+        currency="TRY",
+        txn_type=txn_type,
+        merchant_category=None,
+        channel="mobile",
+        city="Istanbul",
+        country="TR",
+        event_time=datetime.now(timezone.utc),
+        produced_at=datetime.now(timezone.utc),
+        device_id=None,
+    )
+
+def test_qualifies_structuring_uses_band_bounds_inclusive():
+    assert qualifies_structuring(build_single("cash_deposit", structuring_limit_min))
+    assert qualifies_structuring(build_single("cash_deposit", structuring_limit_max))
+    assert not qualifies_structuring(build_single("cash_deposit", structuring_limit_min - 1))
+    assert not qualifies_structuring(build_single("card_payment", 150))
+
+def test_qualifies_smurfing_requires_small_transfer_out():
+    assert qualifies_smurfing(build_single("transfer_out", smurfing_limit_min))
+    assert qualifies_smurfing(build_single("transfer_out", smurfing_limit_max))
+    assert not qualifies_smurfing(build_single("transfer_out", smurfing_limit_max + 1))
+    assert not qualifies_smurfing(build_single("card_payment", smurfing_limit_min))
+
+def test_qualifies_mule_fan_in_requires_transfer_in_in_range():
+    assert qualifies_mule_fan_in(build_single("transfer_in", mule_fan_in_limit_min))
+    assert qualifies_mule_fan_in(build_single("transfer_in", mule_fan_in_limit_max))
+    assert not qualifies_mule_fan_in(build_single("transfer_in", mule_fan_in_limit_min - 1))
+    assert not qualifies_mule_fan_in(build_single("transfer_out", mule_fan_in_limit_min))

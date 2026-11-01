@@ -351,6 +351,60 @@ def test_evaluate_transaction_returns_no_alert_below_threshold():
     mock_execute_values.assert_not_called()
     producer.produce.assert_not_called()
 
+def evaluate_series(window_state, transactions):
+    """Runs transactions through evaluate_transaction and returns the alerts of each one."""
+    with patch('txn_consumer.execute_values'), patch('txn_consumer.logging.warning'):
+        return [
+            txn_consumer.evaluate_transaction(MagicMock(), window_state, MagicMock(), "alerts", transaction)
+            for transaction in transactions
+        ]
+
+def test_evaluate_transaction_does_not_alert_on_non_qualifying_transaction_after_threshold():
+    """A card payment on an account whose structuring window is already above the threshold is not alerted."""
+    window_state = txn_consumer.WindowState(txn_consumer.window_config)
+    card_payment = build_transaction("99999999-1111-1111-1111-111111111111").model_copy(update={
+        "event_time": datetime(2026, 1, 1, 15, 0, 0),
+    })
+
+    results = evaluate_series(window_state, build_structuring_series() + [card_payment])
+
+    assert [a.rule_id for a in results[2]] == ["R-001"]
+    assert results[3] == []
+
+def test_evaluate_transaction_keeps_alerting_on_each_qualifying_transaction_after_threshold():
+    """No suppression: every further in-band deposit while the window is above the threshold is alerted."""
+    window_state = txn_consumer.WindowState(txn_consumer.window_config)
+    series = build_structuring_series()
+    next_deposit = series[0].model_copy(update={
+        "transaction_id": "99999999-1111-1111-1111-111111111111",
+        "event_time": datetime(2026, 1, 1, 16, 0, 0),
+    })
+
+    results = evaluate_series(window_state, series + [next_deposit])
+
+    assert [a.rule_id for a in results[3]] == ["R-001"]
+
+def test_evaluate_transaction_smurfing_alerts_only_on_small_transfer_out():
+    window_state = txn_consumer.WindowState(txn_consumer.window_config)
+    min_count = txn_consumer.scenario_config["smurfing"]["min_count"]
+    transfers = [
+        build_transaction(f"{i:08d}-2222-2222-2222-222222222222").model_copy(update={
+            "txn_type": TxnType.TRANSFER_OUT,
+            "counterparty_id": "33333333-3333-3333-3333-333333333333",
+            "amount": Decimal("200.00"),
+            "event_time": datetime(2026, 1, 1, 12, 0, 0) + timedelta(minutes=10 * i),
+        })
+        for i in range(min_count)
+    ]
+    card_payment = build_transaction("99999999-2222-2222-2222-222222222222").model_copy(update={
+        "event_time": datetime(2026, 1, 1, 20, 0, 0),
+    })
+
+    results = evaluate_series(window_state, transfers + [card_payment])
+
+    assert [a.rule_id for a in results[min_count - 1]] == ["R-002"]
+    assert results[-1] == []
+
 
 # ── Function: run ────────────────────────────────────────────────────────────
 

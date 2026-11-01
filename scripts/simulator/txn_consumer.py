@@ -55,7 +55,15 @@ sys.path.insert(0, str(DETECTOR_DIR))
 
 from schemas import Alert, Channel, Transaction, TxnType
 from window_state import WindowState
-from rule_engine import check_mule_fan_in, check_smurfing, check_structuring, summarize_mule_fan_in
+from rule_engine import (
+    check_mule_fan_in,
+    check_smurfing,
+    check_structuring,
+    qualifies_mule_fan_in,
+    qualifies_smurfing,
+    qualifies_structuring,
+    summarize_mule_fan_in,
+)
 
 # Logging parameters
 logging.basicConfig(
@@ -334,9 +342,13 @@ def evaluate_transaction(conn, window_state, alert_producer, alerts_topic, trans
     alert_time = datetime.now(timezone.utc)
 
     # Check if recent activites are suspicious or not.
+    # A rule alerts only when the incoming transaction is one the rule counts and the window is above the threshold.
     is_structuring, structuring_txns = check_structuring(window_state, transaction.account_id)
     is_smurfing, smurfing_txns = check_smurfing(window_state, transaction.account_id)
     is_mule_fan_in, mule_fan_in_txns = check_mule_fan_in(window_state, transaction.account_id)
+    is_structuring = is_structuring and qualifies_structuring(transaction)
+    is_smurfing = is_smurfing and qualifies_smurfing(transaction)
+    is_mule_fan_in = is_mule_fan_in and qualifies_mule_fan_in(transaction)
 
     # If it is, insert related information to raw.alerts first, then publish and log them.
     alerts = []
