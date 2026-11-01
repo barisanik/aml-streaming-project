@@ -25,8 +25,9 @@ FROM {{ source('raw', 'transactions') }}
 
 {% if is_incremental() %}
 
+-- COALESCE loads everything when the target table exists but is still empty.
 WHERE event_time >= (
-    SELECT MAX(event_time) - INTERVAL '{{ var("lookback_mins") }} minutes'
+    SELECT COALESCE(MAX(event_time) - INTERVAL '{{ var("lookback_mins") }} minutes', '-infinity'::timestamptz)
     FROM {{ this }}
 )
 
