@@ -1,6 +1,7 @@
 # Scenario ↔ Rule Interaction Matrix
 
 Thresholds and rule metadata live in `configs/scenario_config.yml` and window lengths in `configs/window_config.yml`.
+The same mapping is loaded into dbt as `dbt/aml_platform/seeds/scenario_rule_map.csv`. `tests/test_scenario_rule_map.py` fails if this table, the seed and the config drift apart.
 
 | scenario_type | expected rule | status |
 |---|---|---|

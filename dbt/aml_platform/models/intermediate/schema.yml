@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: int_alert_evaluation
+    description: One row per alert, labelled against the answer key.
+    columns:
+      - name: alert_id
+        tests:
+          - unique
+          - not_null
+      - name: evaluation_label
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['true_positive', 'scenario_related', 'cross_rule', 'false_positive']
+      - name: matched_scenario_id
+        description: Scenario credited by the alert. Null for cross_rule and false_positive alerts.
+        tests:
+          - not_null:
+              config:
+                where: "is_true_positive_related"
+      - name: detection_key
+        tests:
+          - not_null
+
+  - name: int_scenario_detection
+    description: One row per injected scenario with its detection outcome.
+    columns:
+      - name: scenario_id
+        tests:
+          - unique
+          - not_null
+      - name: scenario_type
+        tests:
+          - not_null
+      - name: first_alert_id
+        tests:
+          - not_null:
+              config:
+                where: "is_detected"

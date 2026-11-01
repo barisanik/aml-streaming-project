@@ -5,3 +5,10 @@ sources:
     schema: raw
     tables:
       - name: transactions
+      - name: alerts
+
+  - name: public
+    schema: public
+    description: Ground-truth labels written by the producer. The detection side has no access to this schema.
+    tables:
+      - name: answer_key

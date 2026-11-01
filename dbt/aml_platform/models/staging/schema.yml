@@ -108,3 +108,72 @@ models:
                 where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
               arguments:
                 expression: ">= produced_at"
+
+  - name: stg_alerts
+    columns:
+      - name: alert_id
+        tests:
+          - unique
+          - not_null
+      - name: transaction_id
+        tests:
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
+      - name: account_id
+        tests:
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
+      - name: rule_id
+        tests:
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
+          - relationships:
+              arguments:
+                to: ref('scenario_rule_map')
+                field: expected_rule_id
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
+      - name: severity
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['low', 'medium', 'high']
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
+      - name: window_summary
+        tests:
+          - not_null:
+              config:
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
+      - name: detection_latency_ms
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                inclusive: true
+              config:
+                  severity: warn
+                  where: "inserted_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
+
+  - name: stg_answer_key
+    columns:
+      - name: transaction_id
+        tests:
+          - unique
+          - not_null
+      - name: scenario_id
+        tests:
+          - not_null:
+              config:
+                  where: "injected_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"
+      - name: scenario_type
+        tests:
+          - relationships:
+              arguments:
+                to: ref('scenario_rule_map')
+                field: scenario_type
+              config:
+                  where: "injected_at >= now() - INTERVAL '{{ var(\"lookback_mins\") }} minutes'"

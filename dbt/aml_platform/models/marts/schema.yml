@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: mart_detection_performance
+    description: Recall, precision and detection latency per scenario type, plus one overall row.
+    tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "unique_triggers_true_positive <= unique_triggers_related AND unique_triggers_related <= unique_triggers"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "scenarios_detected <= scenarios_detected_related AND scenarios_detected_related <= scenarios_evaluated"
+    columns:
+      - name: scope
+        tests:
+          - unique
+          - not_null
+      - name: recall
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: precision_strict
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: precision_related
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: precision_alert_rows
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: precision_detections
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1

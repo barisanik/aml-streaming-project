@@ -1,0 +1,6 @@
+scenario_type,expected_rule_id,expected_rule_name,is_implemented
+structuring,R-001,structuring,true
+smurfing,R-002,smurfing,true
+mule_fan_in,R-003,mule_fan_in,true
+account_takeover,,profile_deviation,false
+dormant_activation,,profile_deviation,false

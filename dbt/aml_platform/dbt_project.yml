@@ -10,6 +10,7 @@ macro-paths: ["macros"]
 snapshot-paths: ["snapshots"]
 vars:
   lookback_mins: 15
+  scenario_grace_mins: 5   # a scenario counts towards recall only after its last injection is this old
 
 clean-targets:         # directories to be removed by `dbt clean`
   - "target"
@@ -19,3 +20,7 @@ models:
   aml_platform:
     staging:
       +materialized: incremental
+    intermediate:
+      +materialized: table
+    marts:
+      +materialized: table

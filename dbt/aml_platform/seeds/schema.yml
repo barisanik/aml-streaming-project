@@ -1,0 +1,25 @@
+version: 2
+
+seeds:
+  - name: scenario_rule_map
+    description: Expected detection rule for each scenario type. rule_id values must match configs/scenario_config.yml.
+    config:
+      column_types:
+        scenario_type: text
+        expected_rule_id: text
+        expected_rule_name: text
+        is_implemented: boolean
+    columns:
+      - name: scenario_type
+        tests:
+          - unique
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['structuring', 'smurfing', 'mule_fan_in', 'account_takeover', 'dormant_activation']
+      - name: expected_rule_id
+        tests:
+          - unique
+          - not_null:
+              config:
+                where: "is_implemented"
